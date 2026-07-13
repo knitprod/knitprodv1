@@ -15,7 +15,8 @@ import {
   X, 
   LogOut,
   Sun,
-  Moon
+  Moon,
+  Table
 } from 'lucide-react';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
@@ -24,11 +25,11 @@ import KPICards from './components/KPICards';
 import FactoryFloors from './components/FactoryFloors';
 import DashboardCharts from './components/DashboardCharts';
 import RightPanel from './components/RightPanel';
-import ProductionEntryView from './components/ProductionEntryView';
 import FloorDashboardView from './components/FloorDashboardView';
 import ReportsView from './components/ReportsView';
 import UserManagementView from './components/UserManagementView';
 import SettingsView from './components/SettingsView';
+import ProductionLedgerView from './components/ProductionLedgerView';
 
 import { FactoryFloor, ProductionEntry, ActivityLog } from './types';
 import { INITIAL_FLOORS, INITIAL_KPIS, INITIAL_ACTIVITY_LOGS } from './data';
@@ -128,10 +129,84 @@ export default function App() {
     setIsDark((prev) => !prev);
   };
 
-  // Core Application Database States
-  const [floors, setFloors] = useState<FactoryFloor[]>(INITIAL_FLOORS);
+  // Core Application Database States with dynamic localStorage configurations
+  const [floors, setFloors] = useState<FactoryFloor[]>(() => {
+    return INITIAL_FLOORS.map((floor) => {
+      const savedTarget = localStorage.getItem(`target_capacity_${floor.name}`);
+      const savedMachines = localStorage.getItem(`total_machines_${floor.name}`);
+      
+      let targetKg = floor.targetKg;
+      if (savedTarget) {
+        targetKg = parseInt(savedTarget) || 0;
+      } else {
+        const defaults: Record<string, number> = {
+          'EKL': 7500,
+          'EFL': 15000,
+          'EFL-2': 15000,
+          'Auto Stripe': 12000,
+          'EFL-Extension': 15000,
+          'ESL-Extension': 10000,
+        };
+        if (defaults[floor.name] !== undefined) {
+          targetKg = defaults[floor.name];
+        }
+      }
+
+      const totalMachines = savedMachines ? parseInt(savedMachines) || floor.totalMachines : floor.totalMachines;
+      const idleMachines = Math.max(0, totalMachines - floor.runningMachines);
+      const achievementPct = targetKg > 0 ? parseFloat(((floor.productionKg / targetKg) * 100).toFixed(1)) : 0;
+      
+      return {
+        ...floor,
+        targetKg,
+        totalMachines,
+        idleMachines,
+        achievementPct
+      };
+    });
+  });
+
   const [productionEntries, setProductionEntries] = useState<ProductionEntry[]>(INITIAL_ENTRIES);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>(INITIAL_ACTIVITY_LOGS);
+
+  // Sync floor targets and machines configuration dynamically when page or settings change
+  useEffect(() => {
+    setFloors((prevFloors) =>
+      prevFloors.map((floor) => {
+        const savedTarget = localStorage.getItem(`target_capacity_${floor.name}`);
+        const savedMachines = localStorage.getItem(`total_machines_${floor.name}`);
+        
+        let targetKg = floor.targetKg;
+        if (savedTarget) {
+          targetKg = parseInt(savedTarget) || 0;
+        } else {
+          const defaults: Record<string, number> = {
+            'EKL': 7500,
+            'EFL': 15000,
+            'EFL-2': 15000,
+            'Auto Stripe': 12000,
+            'EFL-Extension': 15000,
+            'ESL-Extension': 10000,
+          };
+          if (defaults[floor.name] !== undefined) {
+            targetKg = defaults[floor.name];
+          }
+        }
+
+        const totalMachines = savedMachines ? parseInt(savedMachines) || floor.totalMachines : floor.totalMachines;
+        const idleMachines = Math.max(0, totalMachines - floor.runningMachines);
+        const achievementPct = targetKg > 0 ? parseFloat(((floor.productionKg / targetKg) * 100).toFixed(1)) : 0;
+        
+        return {
+          ...floor,
+          targetKg,
+          totalMachines,
+          idleMachines,
+          achievementPct
+        };
+      })
+    );
+  }, [currentPage]);
 
   // Automatically collapse sidebar on small/tablet devices
   useEffect(() => {
@@ -275,7 +350,7 @@ export default function App() {
               <nav className="space-y-1.5">
                 {[
                   { name: 'Dashboard', icon: Home, label: 'Dashboard' },
-                  { name: 'Production Entry', icon: ClipboardCopy, label: 'Production Entry' },
+                  { name: 'Production Ledger', icon: Table, label: 'Production Ledger' },
                   { name: 'Floor Dashboard', icon: LayoutGrid, label: 'Floor Dashboard' },
                   { name: 'Management Dashboard', icon: TrendingUp, label: 'Management Dashboard' },
                   { name: 'Reports', icon: FileText, label: 'Reports' },
@@ -379,12 +454,11 @@ export default function App() {
               </div>
             )}
 
-            {currentPage === 'Production Entry' && (
+
+
+            {currentPage === 'Production Ledger' && (
               <div className="animate-fade-in">
-                <ProductionEntryView 
-                  floors={floors} 
-                  onSubmitEntry={handleAddProductionEntry} 
-                />
+                <ProductionLedgerView />
               </div>
             )}
 

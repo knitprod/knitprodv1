@@ -15,7 +15,8 @@ import {
   LogOut, 
   ChevronLeft, 
   ChevronRight,
-  Factory
+  Factory,
+  Table
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -36,7 +37,7 @@ export default function Sidebar({
 
   const menuItems = [
     { name: 'Dashboard', icon: Home, label: 'Dashboard' },
-    { name: 'Production Entry', icon: ClipboardCopy, label: 'Production Entry' },
+    { name: 'Production Ledger', icon: Table, label: 'Production Ledger' },
     { name: 'Floor Dashboard', icon: LayoutGrid, label: 'Floor Dashboard' },
     { name: 'Management Dashboard', icon: TrendingUp, label: 'Management Dashboard' },
     { name: 'Reports', icon: FileText, label: 'Reports' },

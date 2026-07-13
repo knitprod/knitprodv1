@@ -71,7 +71,7 @@ export default function Header({
   const alertNotifications = notifications.filter(n => n.type === 'alert');
 
   return (
-    <header className="sticky top-0 z-40 flex h-16 w-full items-center justify-between border-b border-gray-100 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 px-3 sm:px-6 backdrop-blur-md text-gray-900 dark:text-slate-100">
+    <header className="fixed top-0 left-0 right-0 z-40 flex h-16 items-center justify-between border-b border-gray-100 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 px-3 sm:px-6 backdrop-blur-md text-gray-900 dark:text-slate-100">
       {/* Left side: Company Logo Placeholder & Title */}
       <div className="flex items-center gap-1.5 sm:gap-4">
         {/* Hamburger Menu Toggle for Mobile */}

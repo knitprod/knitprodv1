@@ -7,14 +7,53 @@ import React, { useState } from 'react';
 import { Settings, Save, AlertTriangle, Image, Mail, Cpu, Sparkles, CheckCircle } from 'lucide-react';
 
 export default function SettingsView() {
-  const [targetWeight, setTargetWeight] = useState('15000');
-  const [rejectThreshold, setRejectThreshold] = useState('2.5');
-  const [maxIdleMachines, setMaxIdleMachines] = useState('4');
-  const [alarmEmail, setAlarmEmail] = useState('knitprod-alerts@epyllion.com');
+  const [rejectThreshold, setRejectThreshold] = useState(() => localStorage.getItem('setting_rejectThreshold') || '2.5');
+  const [maxIdleMachines, setMaxIdleMachines] = useState(() => localStorage.getItem('setting_maxIdleMachines') || '4');
+  const [alarmEmail, setAlarmEmail] = useState(() => localStorage.getItem('setting_alarmEmail') || 'knitprod-alerts@epyllion.com');
+  
+  // Unit-wise Capacity targets states
+  const [targetEKL, setTargetEKL] = useState(() => localStorage.getItem('target_capacity_EKL') || '7500');
+  const [targetEFL, setTargetEFL] = useState(() => localStorage.getItem('target_capacity_EFL') || '15000');
+  const [targetEFL2, setTargetEFL2] = useState(() => localStorage.getItem('target_capacity_EFL-2') || '15000');
+  const [targetAutoStripe, setTargetAutoStripe] = useState(() => localStorage.getItem('target_capacity_Auto Stripe') || '12000');
+  const [targetEFLExt, setTargetEFLExt] = useState(() => localStorage.getItem('target_capacity_EFL-Extension') || '15000');
+  const [targetESLExt, setTargetESLExt] = useState(() => localStorage.getItem('target_capacity_ESL-Extension') || '10000');
+
+  // Total Machine states initialized with current default configurations
+  const [machinesEKL, setMachinesEKL] = useState(() => localStorage.getItem('total_machines_EKL') || '48');
+  const [machinesEFL, setMachinesEFL] = useState(() => localStorage.getItem('total_machines_EFL') || '40');
+  const [machinesEFL2, setMachinesEFL2] = useState(() => localStorage.getItem('total_machines_EFL-2') || '35');
+  const [machinesAutoStripe, setMachinesAutoStripe] = useState(() => localStorage.getItem('total_machines_Auto Stripe') || '20');
+  const [machinesEFLExt, setMachinesEFLExt] = useState(() => localStorage.getItem('total_machines_EFL-Extension') || '25');
+  const [machinesESLExt, setMachinesESLExt] = useState(() => localStorage.getItem('total_machines_ESL-Extension') || '16');
+
   const [isSaved, setIsSaved] = useState(false);
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Save standard thresholds & fallback standard target
+    localStorage.setItem('setting_targetWeight', targetEFL);
+    localStorage.setItem('setting_rejectThreshold', rejectThreshold);
+    localStorage.setItem('setting_maxIdleMachines', maxIdleMachines);
+    localStorage.setItem('setting_alarmEmail', alarmEmail);
+
+    // Save individual unit-wise capacity targets
+    localStorage.setItem('target_capacity_EKL', targetEKL);
+    localStorage.setItem('target_capacity_EFL', targetEFL);
+    localStorage.setItem('target_capacity_EFL-2', targetEFL2);
+    localStorage.setItem('target_capacity_Auto Stripe', targetAutoStripe);
+    localStorage.setItem('target_capacity_EFL-Extension', targetEFLExt);
+    localStorage.setItem('target_capacity_ESL-Extension', targetESLExt);
+
+    // Save total machines per floor unit
+    localStorage.setItem('total_machines_EKL', machinesEKL);
+    localStorage.setItem('total_machines_EFL', machinesEFL);
+    localStorage.setItem('total_machines_EFL-2', machinesEFL2);
+    localStorage.setItem('total_machines_Auto Stripe', machinesAutoStripe);
+    localStorage.setItem('total_machines_EFL-Extension', machinesEFLExt);
+    localStorage.setItem('total_machines_ESL-Extension', machinesESLExt);
+
     setIsSaved(true);
     setTimeout(() => {
       setIsSaved(false);
@@ -43,7 +82,7 @@ export default function SettingsView() {
       {/* Grid */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Settings Form */}
-        <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-xs lg:col-span-2">
+        <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-xs lg:col-span-2 space-y-6">
           <form onSubmit={handleSave} className="space-y-6">
             <h3 className="font-sans text-sm font-black text-gray-900 uppercase border-b border-gray-50 pb-2 flex items-center gap-2">
               <Settings className="h-4.5 w-4.5 text-blue-600" />
@@ -51,69 +90,135 @@ export default function SettingsView() {
             </h3>
 
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-              {/* Default Floor Target */}
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                  Standard Floor Target (Kg)
+              {/* Unit-wise Target Capacities */}
+              <div className="col-span-1 sm:col-span-2 space-y-3 bg-blue-50/25 dark:bg-slate-900/40 p-4 rounded-xl border border-blue-100/50 dark:border-slate-800">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-blue-900 dark:text-blue-400 block border-b border-blue-100/30 dark:border-slate-800/80 pb-1.5">
+                  Unit-wise Target Capacity (Kg)
                 </label>
-                <input
-                  type="number"
-                  value={targetWeight}
-                  onChange={(e) => setTargetWeight(e.target.value)}
-                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-2.5 text-xs font-bold text-gray-800 transition-colors focus:border-blue-500 focus:bg-white focus:outline-hidden"
-                />
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block">EKL Target</label>
+                    <input
+                      type="number"
+                      value={targetEKL}
+                      onChange={(e) => setTargetEKL(e.target.value)}
+                      className="w-full rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-mono font-bold text-gray-800 dark:text-slate-100 outline-none focus:border-blue-500 focus:bg-white"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block">EFL Target</label>
+                    <input
+                      type="number"
+                      value={targetEFL}
+                      onChange={(e) => setTargetEFL(e.target.value)}
+                      className="w-full rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-mono font-bold text-gray-800 dark:text-slate-100 outline-none focus:border-blue-500 focus:bg-white"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block">EFL-2 Target</label>
+                    <input
+                      type="number"
+                      value={targetEFL2}
+                      onChange={(e) => setTargetEFL2(e.target.value)}
+                      className="w-full rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-mono font-bold text-gray-800 dark:text-slate-100 outline-none focus:border-blue-500 focus:bg-white"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block">Auto Stripe Target</label>
+                    <input
+                      type="number"
+                      value={targetAutoStripe}
+                      onChange={(e) => setTargetAutoStripe(e.target.value)}
+                      className="w-full rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-mono font-bold text-gray-800 dark:text-slate-100 outline-none focus:border-blue-500 focus:bg-white"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block">EFL-Extension</label>
+                    <input
+                      type="number"
+                      value={targetEFLExt}
+                      onChange={(e) => setTargetEFLExt(e.target.value)}
+                      className="w-full rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-mono font-bold text-gray-800 dark:text-slate-100 outline-none focus:border-blue-500 focus:bg-white"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block">ESL-Extension</label>
+                    <input
+                      type="number"
+                      value={targetESLExt}
+                      onChange={(e) => setTargetESLExt(e.target.value)}
+                      className="w-full rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-mono font-bold text-gray-800 dark:text-slate-100 outline-none focus:border-blue-500 focus:bg-white"
+                    />
+                  </div>
+                </div>
               </div>
 
-              {/* Scrap Alarm Threshold */}
+
+            </div>
+
+            <h3 className="font-sans text-sm font-black text-gray-900 uppercase border-b border-gray-50 pt-4 pb-2 flex items-center gap-2">
+              <Cpu className="h-4.5 w-4.5 text-indigo-600" />
+              Total Machine Update
+            </h3>
+
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
               <div className="space-y-1">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                  Defect Scrap Alarm Threshold (%)
-                </label>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">EKL Unit Machines</label>
                 <input
                   type="number"
-                  step="0.1"
-                  value={rejectThreshold}
-                  onChange={(e) => setRejectThreshold(e.target.value)}
-                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-2.5 text-xs font-bold text-gray-800 transition-colors focus:border-blue-500 focus:bg-white focus:outline-hidden"
+                  value={machinesEKL}
+                  onChange={(e) => setMachinesEKL(e.target.value)}
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-800 transition-colors focus:border-blue-500 focus:bg-white focus:outline-hidden"
                 />
               </div>
-
-              {/* Max Idle frames warning */}
               <div className="space-y-1">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                  Max Idle Machinery Limit
-                </label>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">EFL Unit Machines</label>
                 <input
                   type="number"
-                  value={maxIdleMachines}
-                  onChange={(e) => setMaxIdleMachines(e.target.value)}
-                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-2.5 text-xs font-bold text-gray-800 transition-colors focus:border-blue-500 focus:bg-white focus:outline-hidden"
+                  value={machinesEFL}
+                  onChange={(e) => setMachinesEFL(e.target.value)}
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-800 transition-colors focus:border-blue-500 focus:bg-white focus:outline-hidden"
                 />
               </div>
-
-              {/* QA Alert Email hook */}
               <div className="space-y-1">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                  QA Alert Notification Email
-                </label>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">EFL-2 Unit Machines</label>
                 <input
-                  type="email"
-                  value={alarmEmail}
-                  onChange={(e) => setAlarmEmail(e.target.value)}
-                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-2.5 text-xs font-bold text-gray-800 transition-colors focus:border-blue-500 focus:bg-white focus:outline-hidden"
+                  type="number"
+                  value={machinesEFL2}
+                  onChange={(e) => setMachinesEFL2(e.target.value)}
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-800 transition-colors focus:border-blue-500 focus:bg-white focus:outline-hidden"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Auto Stripe Machines</label>
+                <input
+                  type="number"
+                  value={machinesAutoStripe}
+                  onChange={(e) => setMachinesAutoStripe(e.target.value)}
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-800 transition-colors focus:border-blue-500 focus:bg-white focus:outline-hidden"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">EFL-Extension</label>
+                <input
+                  type="number"
+                  value={machinesEFLExt}
+                  onChange={(e) => setMachinesEFLExt(e.target.value)}
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-800 transition-colors focus:border-blue-500 focus:bg-white focus:outline-hidden"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">ESL-Extension</label>
+                <input
+                  type="number"
+                  value={machinesESLExt}
+                  onChange={(e) => setMachinesESLExt(e.target.value)}
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-800 transition-colors focus:border-blue-500 focus:bg-white focus:outline-hidden"
                 />
               </div>
             </div>
 
-            <div className="space-y-4 rounded-xl bg-amber-50/50 border border-amber-100 p-4">
-              <div className="flex items-center gap-2 text-amber-800 font-bold text-xs">
-                <AlertTriangle className="h-4 w-4 text-amber-600" />
-                <span>Automatic Alarm System Trigger Rules</span>
-              </div>
-              <p className="text-[11px] font-medium text-amber-900/70 leading-relaxed">
-                If active floor waste exceeds <strong className="text-amber-950">{rejectThreshold}%</strong> or idle machines count exceeds <strong className="text-amber-950">{maxIdleMachines} frames</strong>, an automated digest is dispatched immediately to the floor supervisor and logged to <strong className="text-amber-950">{alarmEmail}</strong>.
-              </p>
-            </div>
+
 
             <button
               type="submit"
