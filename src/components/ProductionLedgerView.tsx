@@ -103,6 +103,18 @@ const getLocalStorageMachines = (floorName: string, defaultVal: number) => {
   return defaultVal;
 };
 
+const formatDateFriendly = (dateStr: string) => {
+  if (!dateStr) return '';
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return dateStr;
+  const year = parts[0];
+  const monthNum = parseInt(parts[1], 10);
+  const day = parseInt(parts[2], 10);
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const monthName = months[monthNum - 1] || parts[1];
+  return `${day} ${monthName} ${year}`;
+};
+
 // Helper to generate realistic data from July 1st to July 13th for all 6 floors
 const generateInitialLedger = (): LedgerRecord[] => {
   const records: LedgerRecord[] = [];
@@ -247,6 +259,74 @@ export default function ProductionLedgerView() {
     return defaults[floorName] || 15000;
   };
 
+  // Helper to centralize all production, quality, manpower, and machine formulas
+  const recalculateRecordFields = (record: LedgerRecord): LedgerRecord => {
+    const totalM = getTotalMachinesForFloor(record.floor);
+    const unitTargetCap = getTargetForFloor(record.floor);
+    
+    // Total production
+    const totalProduction = record.shiftA + record.shiftB + record.shiftC;
+    
+    // Idle machine
+    const idleMachine = Math.max(0, totalM - record.runningMachine);
+    
+    // Machine utilization %
+    const machineUtilization = totalM > 0 ? parseFloat(((record.runningMachine / totalM) * 100).toFixed(1)) : 0;
+    
+    // Idle machine %
+    const idleMachinePct = totalM > 0 ? parseFloat(((idleMachine / totalM) * 100).toFixed(1)) : 0;
+    
+    // Idle Production
+    const idleProduction = (idleMachine > 0 && unitTargetCap > 0)
+      ? parseFloat(((totalProduction / idleMachine) * (totalM / unitTargetCap)).toFixed(2))
+      : 0;
+    
+    // Production/Machine
+    const productionPerMachine = record.runningMachine > 0 ? parseFloat((totalProduction / record.runningMachine).toFixed(1)) : 0;
+    
+    // Efficiency %
+    const denom = record.runningMachine * (unitTargetCap / (totalM || 1));
+    const efficiency = denom > 0 ? parseFloat(((totalProduction / denom) * 100).toFixed(1)) : 0;
+    
+    // Capacity Utilization %
+    const capacityUtilization = unitTargetCap > 0 ? parseFloat(((totalProduction / unitTargetCap) * 100).toFixed(1)) : 0;
+    
+    // Quality
+    const rejectPct = totalProduction > 0 ? parseFloat(((record.reject / totalProduction) * 100).toFixed(2)) : 0;
+    const holdPct = totalProduction > 0 ? parseFloat(((record.hold / totalProduction) * 100).toFixed(2)) : 0;
+    
+    // Consumables
+    const needlePerKg = totalProduction > 0 ? parseFloat((record.needleBroken / totalProduction).toFixed(5)) : 0;
+    
+    // Manpower
+    const absentPct = record.totalOperator > 0 ? parseFloat(((record.absent / record.totalOperator) * 100).toFixed(1)) : 0;
+    
+    // Performance
+    const productionLossForEfficiency = Math.max(0, record.target - totalProduction);
+
+    return {
+      ...record,
+      totalProduction,
+      idleMachine,
+      machineUtilization,
+      idleMachinePct,
+      idleProduction,
+      productionPerMachine,
+      efficiency,
+      capacityUtilization,
+      rejectPct,
+      holdPct,
+      needlePerKg,
+      absentPct,
+      productionLossForEfficiency
+    };
+  };
+
+  // Enriched ledger state mapping live settings onto all records dynamically
+  const enrichedLedger = useMemo(() => {
+    return ledger.map(recalculateRecordFields);
+  }, [ledger]);
+
   // Filter States - Defaulting to "Yesterday" (July 12, 2026) as per specifications
   const [filterUnit, setFilterUnit] = useState<string>('all');
   const [filterFromDate, setFilterFromDate] = useState<string>('2026-07-12');
@@ -293,7 +373,7 @@ export default function ProductionLedgerView() {
   // FILTER BEHAVIOR & ROW QUERY COMPUTATION
   // ----------------------------------------------------
   const filteredRecords = useMemo(() => {
-    return ledger.filter((r) => {
+    return enrichedLedger.filter((r) => {
       // Unit filter
       const matchesUnit = appliedUnit === 'all' || r.floor === appliedUnit;
 
@@ -480,7 +560,7 @@ export default function ProductionLedgerView() {
     const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
     const monthName = months[monthNum - 1] || 'July';
 
-    return {
+    const initial: LedgerRecord = {
       id: `rec-${Date.now()}`,
       date,
       floor,
@@ -514,6 +594,8 @@ export default function ProductionLedgerView() {
       setChange: 0,
       remarks: ''
     };
+
+    return recalculateRecordFields(initial);
   };
 
   const handleCreateChange = (field: keyof LedgerRecord, value: any) => {
@@ -521,65 +603,7 @@ export default function ProductionLedgerView() {
     
     let updated = { ...creatingRecord, [field]: value };
 
-    // Automatically recalculate calculated fields on-the-fly to guarantee correctness
-    if (['shiftA', 'shiftB', 'shiftC'].includes(field as string)) {
-      const sa = field === 'shiftA' ? parseFloat(value) || 0 : creatingRecord.shiftA;
-      const sb = field === 'shiftB' ? parseFloat(value) || 0 : creatingRecord.shiftB;
-      const sc = field === 'shiftC' ? parseFloat(value) || 0 : creatingRecord.shiftC;
-      updated.totalProduction = sa + sb + sc;
-      
-      if (updated.target > 0) {
-        updated.efficiency = parseFloat(((updated.totalProduction / updated.target) * 100).toFixed(1));
-      }
-      if (updated.totalProduction > 0) {
-        updated.rejectPct = parseFloat(((updated.reject / updated.totalProduction) * 100).toFixed(2));
-        updated.holdPct = parseFloat(((updated.hold / updated.totalProduction) * 100).toFixed(2));
-        updated.needlePerKg = parseFloat((updated.needleBroken / updated.totalProduction).toFixed(5));
-        updated.productionPerMachine = parseFloat((updated.totalProduction / (updated.runningMachine || 1)).toFixed(1));
-      }
-      updated.productionLossForEfficiency = Math.max(0, updated.target - updated.totalProduction);
-    } else if (field === 'target') {
-      const t = parseFloat(value) || 0;
-      if (t > 0) {
-        updated.efficiency = parseFloat(((updated.totalProduction / t) * 100).toFixed(1));
-      }
-      updated.productionLossForEfficiency = Math.max(0, t - updated.totalProduction);
-    } else if (field === 'runningMachine') {
-      const run = parseInt(value) || 0;
-      const totalM = getTotalMachinesForFloor(updated.floor);
-      const idle = Math.max(0, totalM - run);
-      
-      updated.runningMachine = run;
-      updated.idleMachine = idle;
-      if (totalM > 0) {
-        updated.machineUtilization = parseFloat(((run / totalM) * 100).toFixed(1));
-        updated.idleMachinePct = parseFloat(((idle / totalM) * 100).toFixed(1));
-        updated.capacityUtilization = parseFloat(((run / totalM) * 100).toFixed(1));
-      }
-      updated.idleProduction = idle * 260;
-      if (run > 0) {
-        updated.productionPerMachine = parseFloat((updated.totalProduction / run).toFixed(1));
-      }
-    } else if (field === 'reject') {
-      const rej = parseFloat(value) || 0;
-      if (updated.totalProduction > 0) {
-        updated.rejectPct = parseFloat(((rej / updated.totalProduction) * 100).toFixed(2));
-      }
-    } else if (field === 'hold') {
-      const hld = parseFloat(value) || 0;
-      if (updated.totalProduction > 0) {
-        updated.holdPct = parseFloat(((hld / updated.totalProduction) * 100).toFixed(2));
-      }
-    } else if (field === 'needleBroken') {
-      const ndl = parseInt(value) || 0;
-      if (updated.totalProduction > 0) {
-        updated.needlePerKg = parseFloat((ndl / updated.totalProduction).toFixed(5));
-      }
-    } else if (field === 'absent' || field === 'totalOperator') {
-      const ab = field === 'absent' ? parseInt(value) || 0 : creatingRecord.absent;
-      const op = field === 'totalOperator' ? parseInt(value) || 1 : creatingRecord.totalOperator;
-      updated.absentPct = parseFloat(((ab / op) * 100).toFixed(1));
-    } else if (field === 'date') {
+    if (field === 'date') {
       const dateParts = value.split('-');
       if (dateParts.length === 3) {
          const yearNum = parseInt(dateParts[0]);
@@ -601,17 +625,9 @@ export default function ProductionLedgerView() {
       updated.target = fInfo.target;
       updated.totalOperator = fInfo.operators;
       updated.runningMachine = fInfo.machines;
-      updated.idleMachine = 0;
-      updated.machineUtilization = 100;
-      updated.idleMachinePct = 0;
-      updated.idleProduction = 0;
-      updated.capacityUtilization = 100;
-      if (updated.target > 0) {
-        updated.efficiency = parseFloat(((updated.totalProduction / updated.target) * 100).toFixed(1));
-      }
-      updated.productionLossForEfficiency = Math.max(0, updated.target - updated.totalProduction);
     }
 
+    updated = recalculateRecordFields(updated);
     setCreatingRecord(updated);
   };
 
@@ -658,67 +674,7 @@ export default function ProductionLedgerView() {
     
     let updated = { ...editingRecord, [field]: value };
 
-    // Automatically recalculate calculated fields on-the-fly to guarantee correctness
-    if (['shiftA', 'shiftB', 'shiftC'].includes(field as string)) {
-      const sa = field === 'shiftA' ? parseFloat(value) || 0 : editingRecord.shiftA;
-      const sb = field === 'shiftB' ? parseFloat(value) || 0 : editingRecord.shiftB;
-      const sc = field === 'shiftC' ? parseFloat(value) || 0 : editingRecord.shiftC;
-      updated.totalProduction = sa + sb + sc;
-      
-      // also efficiency, rejectPct, holdPct, needlePerKg
-      if (updated.target > 0) {
-        updated.efficiency = parseFloat(((updated.totalProduction / updated.target) * 100).toFixed(1));
-      }
-      if (updated.totalProduction > 0) {
-        updated.rejectPct = parseFloat(((updated.reject / updated.totalProduction) * 100).toFixed(2));
-        updated.holdPct = parseFloat(((updated.hold / updated.totalProduction) * 100).toFixed(2));
-        updated.needlePerKg = parseFloat((updated.needleBroken / updated.totalProduction).toFixed(5));
-        updated.productionPerMachine = parseFloat((updated.totalProduction / (updated.runningMachine || 1)).toFixed(1));
-      }
-      updated.productionLossForEfficiency = Math.max(0, updated.target - updated.totalProduction);
-    } else if (field === 'target') {
-      const t = parseFloat(value) || 0;
-      if (t > 0) {
-        updated.efficiency = parseFloat(((updated.totalProduction / t) * 100).toFixed(1));
-      }
-      updated.productionLossForEfficiency = Math.max(0, t - updated.totalProduction);
-    } else if (field === 'runningMachine') {
-      const run = parseInt(value) || 0;
-      const totalM = getTotalMachinesForFloor(updated.floor);
-      const idle = Math.max(0, totalM - run);
-      
-      updated.runningMachine = run;
-      updated.idleMachine = idle;
-      if (totalM > 0) {
-        updated.machineUtilization = parseFloat(((run / totalM) * 100).toFixed(1));
-        updated.idleMachinePct = parseFloat(((idle / totalM) * 100).toFixed(1));
-        updated.capacityUtilization = parseFloat(((run / totalM) * 100).toFixed(1));
-      }
-      updated.idleProduction = idle * 260;
-      if (run > 0) {
-        updated.productionPerMachine = parseFloat((updated.totalProduction / run).toFixed(1));
-      }
-    } else if (field === 'reject') {
-      const rej = parseFloat(value) || 0;
-      if (updated.totalProduction > 0) {
-        updated.rejectPct = parseFloat(((rej / updated.totalProduction) * 100).toFixed(2));
-      }
-    } else if (field === 'hold') {
-      const hld = parseFloat(value) || 0;
-      if (updated.totalProduction > 0) {
-        updated.holdPct = parseFloat(((hld / updated.totalProduction) * 100).toFixed(2));
-      }
-    } else if (field === 'needleBroken') {
-      const ndl = parseInt(value) || 0;
-      if (updated.totalProduction > 0) {
-        updated.needlePerKg = parseFloat((ndl / updated.totalProduction).toFixed(5));
-      }
-    } else if (field === 'absent' || field === 'totalOperator') {
-      const ab = field === 'absent' ? parseInt(value) || 0 : editingRecord.absent;
-      const op = field === 'totalOperator' ? parseInt(value) || 1 : editingRecord.totalOperator;
-      updated.absentPct = parseFloat(((ab / op) * 100).toFixed(1));
-    } else if (field === 'date') {
-      // extract month & year
+    if (field === 'date') {
       const dateParts = value.split('-');
       if (dateParts.length === 3) {
         const yearNum = parseInt(dateParts[0]);
@@ -729,6 +685,7 @@ export default function ProductionLedgerView() {
       }
     }
 
+    updated = recalculateRecordFields(updated);
     setEditingRecord(updated);
   };
 
@@ -797,7 +754,7 @@ export default function ProductionLedgerView() {
     const headers = [
       [
         "General Information", "", "", "",
-        "Production Data", "", "", "", "",
+        "Production Data", "", "", "", "", "",
         "Machine Performance Logs", "", "", "", "", "", "",
         "Quality Indices", "", "", "",
         "Consumables Ledger", "", "", "",
@@ -806,8 +763,8 @@ export default function ProductionLedgerView() {
         "Other Operational Parameters", ""
       ],
       [
-        "Date (YYYY-MM-DD)", "Floor / Unit", "Month Name", "Calendar Year",
-        "Target Output (Kg)", "Shift A Output (Kg)", "Shift B Output (Kg)", "Shift C Output (Kg)", "Cumulative Yield (Kg)",
+        "Calendar Year", "Month Name", "Date (DD MMM YYYY)", "Floor / Unit",
+        "Target Output (Kg)", "Shift A Output (Kg)", "Shift B Output (Kg)", "Shift C Output (Kg)", "Cumulative Yield (Kg)", "Achievement (%)",
         "Active Machines", "Idle Machines", "Utilization Rate (%)", "Idle Rate (%)", "Idle Production Lost (Kg)", "Net Efficiency (%)", "Production per Active Frame (Kg)",
         "Reject Scrap (Kg)", "Reject Rate (%)", "Hold Scrap (Kg)", "Hold Rate (%)",
         "Needles Broken (Pcs)", "Needle Rate (Pcs/Kg)", "Sinkers Broken (Pcs)", "Lubricating Oil (Liters)",
@@ -817,16 +774,19 @@ export default function ProductionLedgerView() {
       ]
     ];
 
-    const rows = filteredRecords.map(r => [
-      r.date, r.floor, r.month, r.year,
-      r.target, r.shiftA, r.shiftB, r.shiftC, r.totalProduction,
-      r.runningMachine, r.idleMachine, r.machineUtilization, r.idleMachinePct, r.idleProduction, r.efficiency, r.productionPerMachine,
-      r.reject, r.rejectPct, r.hold, r.holdPct,
-      r.needleBroken, r.needlePerKg, r.sinkerBroken, r.oilConsumption,
-      r.productionLossForEfficiency, r.capacityUtilization,
-      r.totalOperator, r.absent, r.absentPct,
-      r.setChange, r.remarks
-    ]);
+    const rows = filteredRecords.map(r => {
+      const ach = r.target > 0 ? parseFloat(((r.totalProduction / r.target) * 100).toFixed(1)) : 0;
+      return [
+        r.year, r.month, formatDateFriendly(r.date), r.floor,
+        r.target, r.shiftA, r.shiftB, r.shiftC, r.totalProduction, ach,
+        r.runningMachine, r.idleMachine, r.machineUtilization, r.idleMachinePct, r.idleProduction, r.efficiency, r.productionPerMachine,
+        r.reject, r.rejectPct, r.hold, r.holdPct,
+        r.needleBroken, r.needlePerKg, r.sinkerBroken, r.oilConsumption,
+        r.productionLossForEfficiency, r.capacityUtilization,
+        r.totalOperator, r.absent, r.absentPct,
+        r.setChange, r.remarks
+      ];
+    });
 
     const worksheetData = [...headers, ...rows];
     const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
@@ -834,19 +794,19 @@ export default function ProductionLedgerView() {
     // Merge group category headers
     worksheet['!merges'] = [
       { s: { r: 0, c: 0 }, e: { r: 0, c: 3 } }, // General Information
-      { s: { r: 0, c: 4 }, e: { r: 0, c: 8 } }, // Production Data
-      { s: { r: 0, c: 9 }, e: { r: 0, c: 15 } }, // Machine Performance
-      { s: { r: 0, c: 16 }, e: { r: 0, c: 19 } }, // Quality Indices
-      { s: { r: 0, c: 20 }, e: { r: 0, c: 23 } }, // Consumables
-      { s: { r: 0, c: 24 }, e: { r: 0, c: 25 } }, // Efficiency Loss
-      { s: { r: 0, c: 26 }, e: { r: 0, c: 28 } }, // Manpower Roster
-      { s: { r: 0, c: 29 }, e: { r: 0, c: 30 } }  // Other Parameters
+      { s: { r: 0, c: 4 }, e: { r: 0, c: 9 } }, // Production Data
+      { s: { r: 0, c: 10 }, e: { r: 0, c: 16 } }, // Machine Performance
+      { s: { r: 0, c: 17 }, e: { r: 0, c: 20 } }, // Quality Indices
+      { s: { r: 0, c: 21 }, e: { r: 0, c: 24 } }, // Consumables
+      { s: { r: 0, c: 25 }, e: { r: 0, c: 26 } }, // Efficiency Loss
+      { s: { r: 0, c: 27 }, e: { r: 0, c: 29 } }, // Manpower Roster
+      { s: { r: 0, c: 30 }, e: { r: 0, c: 31 } }  // Other Parameters
     ];
 
     // Set precise column widths to look incredibly tidy
     const colWidths = [
-      { wch: 15 }, { wch: 18 }, { wch: 12 }, { wch: 8 },
-      { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 18 },
+      { wch: 8 }, { wch: 12 }, { wch: 15 }, { wch: 18 },
+      { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 18 }, { wch: 16 },
       { wch: 14 }, { wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 18 }, { wch: 16 }, { wch: 22 },
       { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 },
       { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 },
@@ -1277,34 +1237,37 @@ export default function ProductionLedgerView() {
             <thead className="sticky top-0 z-20 bg-gray-50 dark:bg-slate-800 shadow-sm">
               <tr className="border-b border-gray-100 dark:border-slate-700 text-[10px] font-black text-[#0F4C81] dark:text-blue-300 uppercase tracking-wider text-center divide-x divide-gray-100 dark:divide-slate-700">
                 <th colSpan={4} className="px-3 py-2 bg-blue-50/50 dark:bg-slate-900/60">General Information</th>
-                <th colSpan={5} className="px-3 py-2 bg-emerald-50/20 dark:bg-slate-900/40">Production</th>
+                <th colSpan={8} className="px-3 py-2 bg-emerald-50/20 dark:bg-slate-900/40">Production</th>
                 <th colSpan={7} className="px-3 py-2 bg-blue-50/50 dark:bg-slate-900/60">Machine Performance</th>
                 <th colSpan={4} className="px-3 py-2 bg-red-50/20 dark:bg-slate-900/40">Quality Standards</th>
                 <th colSpan={4} className="px-3 py-2 bg-blue-50/50 dark:bg-slate-900/60">Consumables</th>
-                <th colSpan={2} className="px-3 py-2 bg-orange-50/20 dark:bg-slate-900/40">Performance Projections</th>
+                <th colSpan={1} className="px-3 py-2 bg-orange-50/20 dark:bg-slate-900/40">Performance Projections</th>
                 <th colSpan={3} className="px-3 py-2 bg-blue-50/50 dark:bg-slate-900/60">Manpower Status</th>
                 <th colSpan={2} className="px-3 py-2 bg-emerald-50/20 dark:bg-slate-900/40">Other Variables</th>
                 <th rowSpan={2} className="px-4 py-2 bg-gray-100 dark:bg-slate-850 text-gray-500 font-bold sticky right-0 z-30">Actions</th>
               </tr>
               <tr className="border-b border-gray-100 dark:border-slate-700 text-[9px] font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap divide-x divide-gray-100 dark:divide-slate-700">
                 {/* General */}
-                <th className="px-3.5 py-2.5 text-left cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-700" onClick={() => { setSortField('date'); setSortAsc(!sortAsc); }}>Date {sortField === 'date' && (sortAsc ? '▲' : '▼')}</th>
-                <th className="px-3.5 py-2.5 text-left cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-700" onClick={() => { setSortField('floor'); setSortAsc(!sortAsc); }}>Floor {sortField === 'floor' && (sortAsc ? '▲' : '▼')}</th>
-                <th className="px-2.5 py-2.5">Month</th>
-                <th className="px-2.5 py-2.5">Year</th>
+                <th className="px-2.5 py-2.5 cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-700 text-left" onClick={() => { setSortField('year'); setSortAsc(!sortAsc); }}>Year {sortField === 'year' && (sortAsc ? '▲' : '▼')}</th>
+                <th className="px-2.5 py-2.5 cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-700 text-left" onClick={() => { setSortField('month'); setSortAsc(!sortAsc); }}>Month {sortField === 'month' && (sortAsc ? '▲' : '▼')}</th>
+                <th className="px-3.5 py-2.5 text-left cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-700" onClick={() => { setSortField('date'); setSortAsc(!sortAsc); }}>Date (DD MMM YYYY) {sortField === 'date' && (sortAsc ? '▲' : '▼')}</th>
+                <th className="px-3.5 py-2.5 text-left cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-700" onClick={() => { setSortField('floor'); setSortAsc(!sortAsc); }}>Unit {sortField === 'floor' && (sortAsc ? '▲' : '▼')}</th>
                 {/* Production */}
                 <th className="px-3 py-2.5 text-right cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-700" onClick={() => { setSortField('target'); setSortAsc(!sortAsc); }}>Target (Kg)</th>
                 <th className="px-2.5 py-2.5 text-right">Shift A</th>
                 <th className="px-2.5 py-2.5 text-right">Shift B</th>
                 <th className="px-2.5 py-2.5 text-right">Shift C</th>
-                <th className="px-3 py-2.5 text-right cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-700" onClick={() => { setSortField('totalProduction'); setSortAsc(!sortAsc); }}>Total Prod (Kg)</th>
+                <th className="px-3 py-2.5 text-right cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-700" onClick={() => { setSortField('totalProduction'); setSortAsc(!sortAsc); }}>Total Prod (Kg) {sortField === 'totalProduction' && (sortAsc ? '▲' : '▼')}</th>
+                <th className="px-3 py-2.5 text-right cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-700" onClick={() => { setSortField('efficiency'); setSortAsc(!sortAsc); }}>Achievement % {sortField === 'efficiency' && (sortAsc ? '▲' : '▼')}</th>
+                <th className="px-2.5 py-2.5 text-center cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-700" onClick={() => { setSortField('efficiency'); setSortAsc(!sortAsc); }}>Efficiency %</th>
+                <th className="px-2.5 py-2.5 text-center cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-700" onClick={() => { setSortField('capacityUtilization'); setSortAsc(!sortAsc); }}>Cap Util %</th>
                 {/* Machine */}
+                <th className="px-2.5 py-2.5 text-center">Total M/C</th>
                 <th className="px-2.5 py-2.5 text-center">Running</th>
                 <th className="px-2.5 py-2.5 text-center">Idle</th>
                 <th className="px-2.5 py-2.5 text-center">Machine Util %</th>
                 <th className="px-2.5 py-2.5 text-center">Idle Machine %</th>
                 <th className="px-2.5 py-2.5 text-right">Idle Prod Loss (Kg)</th>
-                <th className="px-2.5 py-2.5 text-center cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-700" onClick={() => { setSortField('efficiency'); setSortAsc(!sortAsc); }}>Efficiency %</th>
                 <th className="px-2.5 py-2.5 text-right">Prod/Machine</th>
                 {/* Quality */}
                 <th className="px-2.5 py-2.5 text-right">Reject (Kg)</th>
@@ -1318,7 +1281,6 @@ export default function ProductionLedgerView() {
                 <th className="px-2.5 py-2.5 text-center">Oil Cons (Ltr)</th>
                 {/* Performance */}
                 <th className="px-2.5 py-2.5 text-right">Loss for Efficiency</th>
-                <th className="px-2.5 py-2.5 text-center">Cap Util %</th>
                 {/* Manpower */}
                 <th className="px-2.5 py-2.5 text-center">Total Staff</th>
                 <th className="px-2.5 py-2.5 text-center">Absent</th>
@@ -1337,10 +1299,10 @@ export default function ProductionLedgerView() {
                   }`}
                 >
                   {/* General */}
-                  <td className="px-3.5 py-3 font-mono font-bold whitespace-nowrap text-gray-900 dark:text-slate-100">{r.date}</td>
-                  <td className="px-3.5 py-3 font-black whitespace-nowrap text-gray-900 dark:text-slate-100">{r.floor}</td>
-                  <td className="px-2.5 py-3 text-gray-400 whitespace-nowrap">{r.month}</td>
                   <td className="px-2.5 py-3 text-gray-400 font-mono whitespace-nowrap">{r.year}</td>
+                  <td className="px-2.5 py-3 text-gray-400 whitespace-nowrap">{r.month}</td>
+                  <td className="px-3.5 py-3 font-mono font-bold whitespace-nowrap text-gray-900 dark:text-slate-100">{formatDateFriendly(r.date)}</td>
+                  <td className="px-3.5 py-3 font-black whitespace-nowrap text-gray-900 dark:text-slate-100">{r.floor}</td>
 
                   {/* Production */}
                   <td className="px-3 py-3 font-mono font-semibold text-right whitespace-nowrap text-gray-500">{r.target.toLocaleString()}</td>
@@ -1348,13 +1310,7 @@ export default function ProductionLedgerView() {
                   <td className="px-2.5 py-3 font-mono text-right whitespace-nowrap text-gray-500">{r.shiftB.toLocaleString()}</td>
                   <td className="px-2.5 py-3 font-mono text-right whitespace-nowrap text-gray-500">{r.shiftC.toLocaleString()}</td>
                   <td className="px-3 py-3 font-mono font-black text-right whitespace-nowrap text-[#0F4C81] dark:text-blue-300">{r.totalProduction.toLocaleString()}</td>
-
-                  {/* Machine */}
-                  <td className="px-2.5 py-3 font-mono text-center whitespace-nowrap text-emerald-600 font-bold">{r.runningMachine}</td>
-                  <td className="px-2.5 py-3 font-mono text-center whitespace-nowrap text-gray-400">{r.idleMachine}</td>
-                  <td className="px-2.5 py-3 font-mono text-center whitespace-nowrap font-bold text-gray-800 dark:text-slate-200">{r.machineUtilization}%</td>
-                  <td className="px-2.5 py-3 font-mono text-center whitespace-nowrap text-gray-400">{r.idleMachinePct}%</td>
-                  <td className="px-2.5 py-3 font-mono text-right whitespace-nowrap text-gray-400">{r.idleProduction.toLocaleString()}</td>
+                  <td className="px-3 py-3 font-mono font-black text-right whitespace-nowrap text-emerald-600 dark:text-emerald-400">{(r.target > 0 ? (r.totalProduction / r.target) * 100 : 0).toFixed(1)}%</td>
                   <td className="px-2.5 py-3 font-mono text-center whitespace-nowrap">
                     <span className={`px-2 py-0.5 rounded-sm font-black text-[10px] ${
                       r.efficiency >= 95 
@@ -1366,6 +1322,15 @@ export default function ProductionLedgerView() {
                       {r.efficiency}%
                     </span>
                   </td>
+                  <td className="px-2.5 py-3 font-mono text-center whitespace-nowrap text-gray-500">{r.capacityUtilization}%</td>
+
+                  {/* Machine */}
+                  <td className="px-2.5 py-3 font-mono text-center whitespace-nowrap text-gray-400">{getTotalMachinesForFloor(r.floor)}</td>
+                  <td className="px-2.5 py-3 font-mono text-center whitespace-nowrap text-emerald-600 font-bold">{r.runningMachine}</td>
+                  <td className="px-2.5 py-3 font-mono text-center whitespace-nowrap text-gray-400">{r.idleMachine}</td>
+                  <td className="px-2.5 py-3 font-mono text-center whitespace-nowrap font-bold text-gray-800 dark:text-slate-200">{r.machineUtilization}%</td>
+                  <td className="px-2.5 py-3 font-mono text-center whitespace-nowrap text-gray-400">{r.idleMachinePct}%</td>
+                  <td className="px-2.5 py-3 font-mono text-right whitespace-nowrap text-gray-400">{r.idleProduction.toLocaleString()}</td>
                   <td className="px-2.5 py-3 font-mono text-right whitespace-nowrap text-gray-500">{r.productionPerMachine}</td>
 
                   {/* Quality */}
@@ -1382,7 +1347,6 @@ export default function ProductionLedgerView() {
 
                   {/* Performance */}
                   <td className="px-2.5 py-3 font-mono text-right whitespace-nowrap text-red-500">{r.productionLossForEfficiency.toLocaleString()}</td>
-                  <td className="px-2.5 py-3 font-mono text-center whitespace-nowrap text-gray-500">{r.capacityUtilization}%</td>
 
                   {/* Manpower */}
                   <td className="px-2.5 py-3 font-mono text-center whitespace-nowrap text-gray-500">{r.totalOperator}</td>
@@ -1417,7 +1381,7 @@ export default function ProductionLedgerView() {
 
               {sortedRecords.length === 0 && (
                 <tr>
-                  <td colSpan={32} className="py-16 text-center text-xs font-black text-gray-400 uppercase tracking-widest">
+                  <td colSpan={33} className="py-16 text-center text-xs font-black text-gray-400 uppercase tracking-widest">
                     No active daily logs found matching query filters.
                   </td>
                 </tr>
