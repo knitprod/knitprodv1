@@ -9,533 +9,566 @@ import {
   Percent, 
   Cpu, 
   Trash2, 
-  Layers, 
   Clock, 
   Info,
-  Calendar,
-  AlertTriangle
+  AlertTriangle,
+  UserCheck,
+  Wrench,
+  Droplet,
+  Shuffle,
+  ShieldAlert,
+  Sliders,
+  Sparkles
 } from 'lucide-react';
-import { 
-  PRODUCTION_TREND_DATA, 
-  ACHIEVEMENT_TREND_DATA, 
-  REJECT_ANALYSIS_DATA, 
-  SHIFT_PERFORMANCE_DATA, 
-  MACHINE_UTILIZATION_DATA,
-  INITIAL_FLOORS 
-} from '../data';
 
-export default function DashboardCharts() {
-  const [activeTab, setActiveTab] = useState<'all' | 'production' | 'machines' | 'rejects'>('all');
-  const [hoveredProductionIndex, setHoveredProductionIndex] = useState<number | null>(null);
-  const [hoveredRejectIndex, setHoveredRejectIndex] = useState<number | null>(null);
+interface DashboardChartsProps {
+  filterUnit: string;
+  filterDateMode: 'single' | 'range' | 'month' | 'year';
+  filterSingleDate: string;
+  filterDateFrom: string;
+  filterDateTo: string;
+  filterMonth: string;
+  filterYear: string;
+  isLoading?: boolean;
+}
 
-  // SVG Chart Dimensions & Computations
-  const productionChartHeight = 160;
-  const productionChartWidth = 500;
-  
-  // Production Trend Line Computations
-  const maxProdValue = 110000;
-  const scaleY = (val: number) => productionChartHeight - (val / maxProdValue) * productionChartHeight;
-  
-  const targetLinePoints = PRODUCTION_TREND_DATA.map((d, i) => {
-    const x = (i / (PRODUCTION_TREND_DATA.length - 1)) * productionChartWidth;
-    const y = scaleY(d.value1);
-    return `${x},${y}`;
-  }).join(' ');
+export default function DashboardCharts({
+  filterUnit,
+  filterDateMode,
+  filterSingleDate,
+  filterDateFrom,
+  filterDateTo,
+  filterMonth,
+  filterYear,
+  isLoading = false
+}: DashboardChartsProps) {
+  const [activeTab, setActiveTab] = useState<'all' | 'core' | 'operations' | 'consumables'>('all');
+  const [hoveredIndex, setHoveredIndex] = useState<{chart: string, index: number} | null>(null);
 
-  const actualLinePoints = PRODUCTION_TREND_DATA.map((d, i) => {
-    const x = (i / (PRODUCTION_TREND_DATA.length - 1)) * productionChartWidth;
-    const y = scaleY(d.value2 || 0);
-    return `${x},${y}`;
-  }).join(' ');
+  // Simple deterministic randomizer based on unit name and date to seed realistic datasets
+  const getSeededValue = (seedStr: string, multiplier: number, offset: number) => {
+    let hash = 0;
+    const combined = `${seedStr}_${filterUnit}_${filterDateMode}`;
+    for (let i = 0; i < combined.length; i++) {
+      hash = combined.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const val = Math.abs(Math.sin(hash) * multiplier) + offset;
+    return Math.round(val * 10) / 10;
+  };
 
-  // Area points (for actual production gradient shadow)
-  const actualAreaPoints = `${PRODUCTION_TREND_DATA.map((d, i) => {
-    const x = (i / (PRODUCTION_TREND_DATA.length - 1)) * productionChartWidth;
-    const y = scaleY(d.value2 || 0);
-    return `${x},${y}`;
-  }).join(' ')} ${productionChartWidth},${productionChartHeight} 0,${productionChartHeight}`;
+  const getSeededDataArray = (seedName: string, length: number, mult: number, off: number, pct = false) => {
+    const arr = [];
+    const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    for (let i = 0; i < length; i++) {
+      const v1 = getSeededValue(`${seedName}_v1_${i}`, mult, off);
+      const v2 = getSeededValue(`${seedName}_v2_${i}`, mult * 0.95, off * 0.98);
+      const v3 = getSeededValue(`${seedName}_v3_${i}`, mult * 0.08, off * 0.02);
+      arr.push({
+        label: labels[i % labels.length],
+        value1: pct ? Math.min(Math.round(v1), 100) : Math.round(v1),
+        value2: pct ? Math.min(Math.round(v2), 100) : Math.round(v2),
+        value3: Math.round(v3)
+      });
+    }
+    return arr;
+  };
+
+  // Generate dynamic, unit-specific data points
+  const productionData = getSeededDataArray('production', 7, 20000, 10000); // Target vs Actual
+  const qualityData = getSeededDataArray('quality', 5, 80, 20); // Reject vs Hold
+  const efficiencyData = getSeededDataArray('efficiency', 7, 15, 80, true); // Efficiency Trend
+  const capacityData = getSeededDataArray('capacity', 6, 20, 75, true); // Capacity Utilization
+  const absenteeismData = getSeededDataArray('absenteeism', 5, 4, 1.5); // Absenteeism Rate
+  const needleData = getSeededDataArray('needle', 7, 40, 150); // Needle wear count
+  const sinkerData = getSeededDataArray('sinker', 7, 30, 100); // Sinker replacements
+  const oilData = getSeededDataArray('oil', 7, 25, 120); // Oil liters
+  const setChangeData = getSeededDataArray('setchange', 5, 15, 45); // Set Changeover speed minutes
+
+  // Total sums for comparison headers
+  const totalTarget = productionData.reduce((sum, d) => sum + d.value1, 0);
+  const totalActual = productionData.reduce((sum, d) => sum + d.value2, 0);
+  const overallAchievement = Math.round((totalActual / totalTarget) * 100);
+
+  // Shimmer Loader Skeleton Component
+  const SkeletonCard = () => (
+    <div className="rounded-2xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs animate-pulse space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="h-7 w-7 rounded-lg bg-gray-100 dark:bg-slate-800" />
+          <div className="space-y-1.5">
+            <div className="h-4 w-36 rounded-md bg-gray-100 dark:bg-slate-800" />
+            <div className="h-2.5 w-24 rounded-md bg-gray-50 dark:bg-slate-800/50" />
+          </div>
+        </div>
+        <div className="h-5 w-16 rounded-md bg-gray-100 dark:bg-slate-800" />
+      </div>
+      <div className="h-32 w-full rounded-xl bg-gray-50/50 dark:bg-slate-800/30 flex items-end p-2 gap-2">
+        <div className="h-12 flex-1 rounded-sm bg-gray-100 dark:bg-slate-800" />
+        <div className="h-24 flex-1 rounded-sm bg-gray-100 dark:bg-slate-800" />
+        <div className="h-16 flex-1 rounded-sm bg-gray-100 dark:bg-slate-800" />
+        <div className="h-20 flex-1 rounded-sm bg-gray-100 dark:bg-slate-800" />
+        <div className="h-28 flex-1 rounded-sm bg-gray-100 dark:bg-slate-800" />
+      </div>
+    </div>
+  );
 
   return (
-    <div className="space-y-6">
-      {/* Chart Filter Tabs */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 pb-3">
+    <div className="space-y-6" id="dashboard-charts-panel">
+      {/* 1. Category tabs selector */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 dark:border-slate-800 pb-3">
         <div>
-          <h2 className="font-sans text-lg font-black tracking-tight text-gray-900">
-            Performance Analytics Engine
+          <h2 className="font-sans text-base font-extrabold tracking-tight text-gray-900 dark:text-slate-100 flex items-center gap-1.5">
+            <Sparkles className="h-4.5 w-4.5 text-[#0F4C81] dark:text-blue-400" />
+            <span>Knitting Operations Analytics</span>
           </h2>
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-            Consolidated factory floor analytics
+          <p className="text-[10px] font-bold text-gray-400 dark:text-slate-500 uppercase tracking-wider">
+            Deep performance analytics spanning 9 core metrics
           </p>
         </div>
-        <div className="flex gap-1.5 rounded-lg bg-gray-50 p-1">
-          {(['all', 'production', 'machines', 'rejects'] as const).map((tab) => (
+
+        <div className="flex gap-1 rounded-lg bg-gray-100 dark:bg-slate-800 p-1 self-start sm:self-auto overflow-x-auto w-full sm:w-auto scrollbar-none">
+          {([
+            { id: 'all', label: 'All Charts' },
+            { id: 'core', label: 'Core Yield' },
+            { id: 'operations', label: 'Operations' },
+            { id: 'consumables', label: 'Consumables' }
+          ] as const).map((tab) => (
             <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`rounded-md px-3 py-1 text-xs font-bold uppercase tracking-wider transition-all ${
-                activeTab === tab 
-                  ? 'bg-white text-gray-900 shadow-xs' 
-                  : 'text-gray-400 hover:text-gray-700'
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`rounded-md px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
+                activeTab === tab.id 
+                  ? 'bg-white dark:bg-slate-700 text-[#0F4C81] dark:text-white shadow-xs' 
+                  : 'text-gray-400 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200'
               }`}
-              id={`chart-tab-${tab}`}
+              id={`analytics-tab-${tab.id}`}
             >
-              {tab === 'all' ? 'All Metrics' : tab}
+              {tab.label}
             </button>
           ))}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* CHART 1: Production Trend (Target vs Actual) */}
-        {(activeTab === 'all' || activeTab === 'production') && (
-          <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-xs" id="chart-card-production-trend">
-            <div className="flex items-center justify-between border-b border-gray-50 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
-                  <TrendingUp className="h-4 w-4" />
+      {isLoading ? (
+        // Loading State: Skeletons Grid
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+        </div>
+      ) : (
+        // Active Charts Grid
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+          
+          {/* ==========================================================
+              CATEGORY 1: CORE YIELD & QUALITY
+             ========================================================== */}
+
+          {/* CHART 1: Target vs Production */}
+          {(activeTab === 'all' || activeTab === 'core') && (
+            <div className="rounded-2xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs hover:border-gray-200 transition-all" id="chart-target-vs-prod">
+              <div className="flex items-center justify-between border-b border-gray-50 dark:border-slate-800/50 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-950/40 text-[#0F4C81] dark:text-blue-400">
+                    <TrendingUp className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-sans text-xs font-black text-gray-900 dark:text-slate-100">Target vs Production</h3>
+                    <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase">Knitted Yield trend (Kg)</p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="font-sans text-sm font-black text-gray-900">Production Trend (Daily Plan vs Actual)</h3>
-                  <p className="text-[10px] font-semibold text-gray-400 uppercase">Last 7 Days (Kg Knitting Output)</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3 text-[10px] font-bold">
-                <span className="flex items-center gap-1.5 text-gray-400">
-                  <span className="h-1.5 w-4 rounded-full border border-gray-400 border-dashed" /> Target
+                <span className="text-[10px] font-mono font-extrabold text-blue-700 dark:text-blue-400">
+                  {overallAchievement}% Ach.
                 </span>
-                <span className="flex items-center gap-1.5 text-blue-600">
-                  <span className="h-2 w-2 rounded-full bg-blue-600" /> Actual
-                </span>
-              </div>
-            </div>
-
-            {/* Interactive SVG Line & Area Chart */}
-            <div className="mt-5 relative">
-              <svg 
-                viewBox={`0 0 ${productionChartWidth} ${productionChartHeight}`} 
-                className="w-full overflow-visible"
-              >
-                {/* Defs for gradients */}
-                <defs>
-                  <linearGradient id="actualAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#0F4C81" stopOpacity="0.25" />
-                    <stop offset="100%" stopColor="#0F4C81" stopOpacity="0.0" />
-                  </linearGradient>
-                </defs>
-
-                {/* Horizontal Grid lines */}
-                {[0, 0.25, 0.5, 0.75, 1].map((p, idx) => (
-                  <line 
-                    key={idx}
-                    x1="0" 
-                    y1={productionChartHeight * p} 
-                    x2={productionChartWidth} 
-                    y2={productionChartHeight * p} 
-                    stroke="#F1F5F9" 
-                    strokeWidth="1" 
-                  />
-                ))}
-
-                {/* Vertical helper highlights on hover */}
-                {hoveredProductionIndex !== null && (
-                  <line 
-                    x1={(hoveredProductionIndex / (PRODUCTION_TREND_DATA.length - 1)) * productionChartWidth}
-                    y1="0"
-                    x2={(hoveredProductionIndex / (PRODUCTION_TREND_DATA.length - 1)) * productionChartWidth}
-                    y2={productionChartHeight}
-                    stroke="#94A3B8"
-                    strokeWidth="1.5"
-                    strokeDasharray="4 4"
-                  />
-                )}
-
-                {/* Target Line (Dashed Slate) */}
-                <polyline
-                  fill="none"
-                  stroke="#94A3B8"
-                  strokeWidth="2"
-                  strokeDasharray="5 5"
-                  points={targetLinePoints}
-                />
-
-                {/* Actual Area (Gradient fill) */}
-                <polygon
-                  fill="url(#actualAreaGrad)"
-                  points={actualAreaPoints}
-                />
-
-                {/* Actual Line (Deep Blue #0F4C81) */}
-                <polyline
-                  fill="none"
-                  stroke="#0F4C81"
-                  strokeWidth="3.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  points={actualLinePoints}
-                />
-
-                {/* Interactive circles */}
-                {PRODUCTION_TREND_DATA.map((d, i) => {
-                  const x = (i / (PRODUCTION_TREND_DATA.length - 1)) * productionChartWidth;
-                  const y = scaleY(d.value2 || 0);
-                  const isHovered = hoveredProductionIndex === i;
-
-                  return (
-                    <circle
-                      key={i}
-                      cx={x}
-                      cy={y}
-                      r={isHovered ? 6 : 4}
-                      fill={isHovered ? "#0F4C81" : "#FFFFFF"}
-                      stroke="#0F4C81"
-                      strokeWidth={isHovered ? 3 : 2}
-                      className="cursor-pointer transition-all duration-150"
-                      onMouseEnter={() => setHoveredProductionIndex(i)}
-                      onMouseLeave={() => setHoveredProductionIndex(null)}
-                    />
-                  );
-                })}
-              </svg>
-
-              {/* X-Axis labels */}
-              <div className="mt-3 flex justify-between px-1 text-[10px] font-bold text-gray-400">
-                {PRODUCTION_TREND_DATA.map((d, idx) => (
-                  <span key={idx}>{d.label}</span>
-                ))}
               </div>
 
-              {/* Dynamic Chart Tooltip */}
-              {hoveredProductionIndex !== null && (
-                <div className="absolute top-2 left-1/2 -translate-x-1/2 flex items-center gap-4 rounded-lg border border-gray-100 bg-white p-2.5 shadow-md ring-1 ring-black/5">
-                  <div>
-                    <span className="block text-[9px] font-bold text-gray-400 uppercase">
-                      {PRODUCTION_TREND_DATA[hoveredProductionIndex].label} Target
-                    </span>
-                    <span className="font-mono text-xs font-black text-gray-500">
-                      {PRODUCTION_TREND_DATA[hoveredProductionIndex].value1.toLocaleString()} Kg
-                    </span>
-                  </div>
-                  <div className="h-6 w-px bg-gray-100" />
-                  <div>
-                    <span className="block text-[9px] font-bold text-blue-600 uppercase">
-                      Actual Yield
-                    </span>
-                    <span className="font-mono text-xs font-black text-blue-800">
-                      {PRODUCTION_TREND_DATA[hoveredProductionIndex].value2?.toLocaleString()} Kg
-                    </span>
-                  </div>
-                  <div className="h-6 w-px bg-gray-100" />
-                  <div>
-                    <span className="block text-[9px] font-bold text-emerald-600 uppercase">
-                      Achievement
-                    </span>
-                    <span className="font-mono text-xs font-black text-emerald-700">
-                      {Math.round(((PRODUCTION_TREND_DATA[hoveredProductionIndex].value2 || 0) / PRODUCTION_TREND_DATA[hoveredProductionIndex].value1) * 100)}%
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* CHART 2: Achievement Trend */}
-        {(activeTab === 'all' || activeTab === 'production') && (
-          <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-xs" id="chart-card-achievement-trend">
-            <div className="flex items-center justify-between border-b border-gray-50 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
-                  <Percent className="h-4 w-4" />
-                </div>
-                <div>
-                  <h3 className="font-sans text-sm font-black text-gray-900">Achievement Trend</h3>
-                  <p className="text-[10px] font-semibold text-gray-400 uppercase">Daily performance percentage against standard</p>
-                </div>
-              </div>
-              <span className="text-xs font-bold text-emerald-700 rounded-full bg-emerald-50 px-2.5 py-0.5">
-                Avg: 97.4%
-              </span>
-            </div>
-
-            {/* Achievement Line Visualization */}
-            <div className="mt-5 space-y-4">
-              <div className="flex items-end justify-between gap-2 h-28">
-                {ACHIEVEMENT_TREND_DATA.map((d, idx) => {
-                  const targetHeight = `${d.value1}%`;
-                  const isUnder = d.value1 < 95;
-                  
-                  return (
-                    <div key={idx} className="flex flex-col items-center gap-2 flex-1 group">
-                      <div className="relative w-full flex flex-col justify-end h-24">
-                        {/* Hover Tooltip */}
-                        <div className="absolute -top-7 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 bg-gray-900 text-white font-mono text-[9px] px-1.5 py-0.5 rounded transition-all pointer-events-none whitespace-nowrap z-10">
-                          {d.value1}% achievement
+              {/* Dynamic Trend Curves */}
+              <div className="mt-4 relative">
+                <div className="flex items-end justify-between h-32 gap-1.5 pt-2">
+                  {productionData.map((d, i) => {
+                    const maxVal = Math.max(...productionData.map(x => Math.max(x.value1, x.value2)));
+                    const h1 = `${(d.value1 / maxVal) * 100}%`;
+                    const h2 = `${(d.value2 / maxVal) * 100}%`;
+                    return (
+                      <div 
+                        key={i} 
+                        className="flex flex-col items-center gap-1.5 flex-1 relative group"
+                        onMouseEnter={() => setHoveredIndex({ chart: 'prod', index: i })}
+                        onMouseLeave={() => setHoveredIndex(null)}
+                      >
+                        {/* Interactive Tooltip */}
+                        {hoveredIndex?.chart === 'prod' && hoveredIndex.index === i && (
+                          <div className="absolute -top-12 left-1/2 -translate-x-1/2 bg-slate-900 text-white p-1.5 rounded-lg text-[9px] font-bold z-10 shadow-lg whitespace-nowrap">
+                            Target: {d.value1.toLocaleString()} Kg<br />
+                            Actual: {d.value2.toLocaleString()} Kg
+                          </div>
+                        )}
+                        <div className="w-full flex items-end justify-center h-24 gap-1">
+                          {/* Target Column */}
+                          <div className="w-2.5 rounded-t-sm bg-slate-200 dark:bg-slate-800" style={{ height: h1 }} />
+                          {/* Actual Column */}
+                          <div className="w-2.5 rounded-t-sm bg-blue-600 dark:bg-blue-500" style={{ height: h2 }} />
                         </div>
-                        
-                        <div 
-                          className={`w-full rounded-t-md transition-all duration-300 ${
-                            isUnder 
-                              ? 'bg-amber-400 group-hover:bg-amber-500' 
-                              : 'bg-emerald-500 group-hover:bg-emerald-600'
-                          }`}
-                          style={{ height: targetHeight }}
-                        />
+                        <span className="text-[9px] font-bold text-gray-400 dark:text-slate-500">{d.label}</span>
                       </div>
-                      <span className="text-[10px] font-bold text-gray-400 uppercase">{d.label.split(' ')[1]}</span>
+                    );
+                  })}
+                </div>
+                <div className="flex justify-center gap-3 mt-3 text-[9px] font-bold text-gray-400">
+                  <span className="flex items-center gap-1"><span className="h-2 w-2 bg-slate-200 dark:bg-slate-800 rounded-xs" /> Target</span>
+                  <span className="flex items-center gap-1"><span className="h-2 w-2 bg-blue-600 dark:bg-blue-500 rounded-xs" /> Actual Yield</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* CHART 2: Reject vs Hold */}
+          {(activeTab === 'all' || activeTab === 'core') && (
+            <div className="rounded-2xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs hover:border-gray-200 transition-all" id="chart-reject-vs-hold">
+              <div className="flex items-center justify-between border-b border-gray-50 dark:border-slate-800/50 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400">
+                    <Trash2 className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-sans text-xs font-black text-gray-900 dark:text-slate-100">Reject vs Hold</h3>
+                    <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase">Defective Scrap vs Hold Quantity (Kg)</p>
+                  </div>
+                </div>
+                <span className="text-[10px] font-mono font-extrabold text-red-600 dark:text-red-400">
+                  Warning status
+                </span>
+              </div>
+
+              {/* Dynamic Reject vs Hold Stacked Column Chart */}
+              <div className="mt-4 relative">
+                <div className="flex items-end justify-between h-32 gap-1.5 pt-2">
+                  {qualityData.map((d, i) => {
+                    const totalVal = d.value1 + d.value2;
+                    const maxVal = Math.max(...qualityData.map(x => x.value1 + x.value2)) || 100;
+                    const h1 = `${(d.value1 / maxVal) * 100}%`; // Reject
+                    const h2 = `${(d.value2 / maxVal) * 100}%`; // Hold
+                    return (
+                      <div 
+                        key={i} 
+                        className="flex flex-col items-center gap-1.5 flex-1 relative group"
+                        onMouseEnter={() => setHoveredIndex({ chart: 'quality', index: i })}
+                        onMouseLeave={() => setHoveredIndex(null)}
+                      >
+                        {hoveredIndex?.chart === 'quality' && hoveredIndex.index === i && (
+                          <div className="absolute -top-12 left-1/2 -translate-x-1/2 bg-slate-900 text-white p-1.5 rounded-lg text-[9px] font-bold z-10 shadow-lg whitespace-nowrap">
+                            Reject: {d.value1} Kg<br />
+                            Hold: {d.value2} Kg
+                          </div>
+                        )}
+                        <div className="w-full flex flex-col justify-end h-24">
+                          <div className="w-5 mx-auto rounded-t-sm overflow-hidden flex flex-col justify-end" style={{ height: `${(totalVal / maxVal) * 100}%` }}>
+                            <div className="bg-amber-400 dark:bg-amber-500 flex-1" style={{ height: h2 }} />
+                            <div className="bg-red-500 dark:bg-red-600 flex-1" style={{ height: h1 }} />
+                          </div>
+                        </div>
+                        <span className="text-[9px] font-bold text-gray-400 dark:text-slate-500">Day {i+1}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="flex justify-center gap-3 mt-3 text-[9px] font-bold text-gray-400">
+                  <span className="flex items-center gap-1"><span className="h-2 w-2 bg-red-500 rounded-xs" /> Reject Scrap</span>
+                  <span className="flex items-center gap-1"><span className="h-2 w-2 bg-amber-400 rounded-xs" /> QA Hold</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* CHART 3: Efficiency */}
+          {(activeTab === 'all' || activeTab === 'core') && (
+            <div className="rounded-2xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs hover:border-gray-200 transition-all" id="chart-efficiency-curve">
+              <div className="flex items-center justify-between border-b border-gray-50 dark:border-slate-800/50 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400">
+                    <Percent className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-sans text-xs font-black text-gray-900 dark:text-slate-100">Efficiency Ratio</h3>
+                    <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase">Cylinder run efficiency (%)</p>
+                  </div>
+                </div>
+                <span className="text-[10px] font-mono font-extrabold text-emerald-600 dark:text-emerald-400">
+                  Target: 95%
+                </span>
+              </div>
+
+              {/* Dynamic Area Trend Curve */}
+              <div className="mt-4 relative">
+                <div className="flex items-end justify-between h-32 gap-1.5 pt-2">
+                  {efficiencyData.map((d, i) => {
+                    const h1 = `${d.value1}%`;
+                    return (
+                      <div 
+                        key={i} 
+                        className="flex flex-col items-center gap-1.5 flex-1 relative group"
+                        onMouseEnter={() => setHoveredIndex({ chart: 'eff', index: i })}
+                        onMouseLeave={() => setHoveredIndex(null)}
+                      >
+                        {hoveredIndex?.chart === 'eff' && hoveredIndex.index === i && (
+                          <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-1.5 py-1 rounded text-[9px] font-bold z-10 shadow-lg whitespace-nowrap">
+                            {d.value1}% Efficiency
+                          </div>
+                        )}
+                        <div className="w-full flex items-end justify-center h-24">
+                          <div 
+                            className="w-4 rounded-t-md bg-emerald-500 dark:bg-emerald-600 group-hover:bg-emerald-600 transition-all" 
+                            style={{ height: h1 }} 
+                          />
+                        </div>
+                        <span className="text-[9px] font-bold text-gray-400 dark:text-slate-500">{d.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="mt-3 text-[10px] text-gray-500 text-center font-bold">
+                  Weekly Run-efficiency Weighted Average
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ==========================================================
+              CATEGORY 2: OPERATIONS & ATTENDANCE
+             ========================================================== */}
+
+          {/* CHART 4: Capacity Utilization */}
+          {(activeTab === 'all' || activeTab === 'operations') && (
+            <div className="rounded-2xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs hover:border-gray-200 transition-all" id="chart-capacity-utilization">
+              <div className="flex items-center justify-between border-b border-gray-50 dark:border-slate-800/50 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#0F4C81]/10 text-[#0F4C81] dark:text-blue-400">
+                    <Cpu className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-sans text-xs font-black text-gray-900 dark:text-slate-100">Capacity Utilization</h3>
+                    <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase">Circular loom frame loading</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Dynamic Capacity bars */}
+              <div className="mt-4 space-y-3.5 pt-2">
+                {capacityData.slice(0, 4).map((f, i) => (
+                  <div key={i} className="space-y-1">
+                    <div className="flex justify-between text-[11px] font-bold">
+                      <span className="text-gray-700 dark:text-slate-300">Loom Area {i + 1}</span>
+                      <span className="font-mono text-slate-500">{f.value1}% Loaded</span>
                     </div>
-                  );
-                })}
-              </div>
-              
-              {/* Context Note */}
-              <div className="rounded-xl bg-gray-50 p-3 flex items-start gap-2.5 text-[11px] text-gray-500 font-medium">
-                <Info className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
-                <p>
-                  Achievement peaked at <strong className="text-emerald-700">101.2%</strong> on Jul 09 due to high efficiency yarn allocation, with a minor dip today as EFL-Extension underwent motor tuning.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* CHART 3: Machine Utilization */}
-        {(activeTab === 'all' || activeTab === 'machines') && (
-          <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-xs" id="chart-card-machine-utilization">
-            <div className="flex items-center justify-between border-b border-gray-50 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
-                  <Cpu className="h-4 w-4" />
-                </div>
-                <div>
-                  <h3 className="font-sans text-sm font-black text-gray-900">Machine Utilization by Floor</h3>
-                  <p className="text-[10px] font-semibold text-gray-400 uppercase">Knitting frame allocations (Running vs Idle)</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Horizontal Stacked Bars */}
-            <div className="mt-5 space-y-4">
-              <div className="flex items-center gap-4 text-[10px] font-bold">
-                <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-blue-600" /> Running Frames</span>
-                <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-400" /> Idle / Setup</span>
-                <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-red-500" /> Maintenance</span>
-              </div>
-
-              <div className="space-y-3">
-                {MACHINE_UTILIZATION_DATA.map((floor, idx) => {
-                  const total = floor.value1 + floor.value2 + floor.value3;
-                  const runPct = (floor.value1 / total) * 100;
-                  const idlePct = (floor.value2 / total) * 100;
-                  const maintPct = (floor.value3 / total) * 100;
-
-                  return (
-                    <div key={idx} className="space-y-1">
-                      <div className="flex items-center justify-between text-xs font-bold">
-                        <span className="text-gray-700">{floor.label}</span>
-                        <span className="font-mono text-gray-400">
-                          {floor.value1} / {total} Active ({Math.round(runPct)}%)
-                        </span>
-                      </div>
-                      <div className="flex h-3.5 w-full overflow-hidden rounded-full bg-gray-100 shadow-inner">
-                        <div 
-                          className="h-full bg-blue-600 transition-all duration-500 hover:opacity-95"
-                          style={{ width: `${runPct}%` }}
-                          title={`Running: ${floor.value1}`}
-                        />
-                        <div 
-                          className="h-full bg-amber-400 transition-all duration-500 hover:opacity-95"
-                          style={{ width: `${idlePct}%` }}
-                          title={`Idle: ${floor.value2}`}
-                        />
-                        <div 
-                          className="h-full bg-red-500 transition-all duration-500 hover:opacity-95"
-                          style={{ width: `${maintPct}%` }}
-                          title={`Maintenance: ${floor.value3}`}
-                        />
-                      </div>
+                    <div className="h-2 w-full rounded-full bg-gray-100 dark:bg-slate-800 overflow-hidden">
+                      <div 
+                        className="h-full bg-blue-700 dark:bg-blue-500 rounded-full" 
+                        style={{ width: `${f.value1}%` }} 
+                      />
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* CHART 4: Reject Analysis */}
-        {(activeTab === 'all' || activeTab === 'rejects') && (
-          <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-xs" id="chart-card-reject-analysis">
-            <div className="flex items-center justify-between border-b border-gray-50 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-red-50 text-red-600">
-                  <Trash2 className="h-4 w-4" />
-                </div>
-                <div>
-                  <h3 className="font-sans text-sm font-black text-gray-900">Fabric Reject Analysis (Pareto)</h3>
-                  <p className="text-[10px] font-semibold text-gray-400 uppercase">Defect classification breakdown</p>
+          {/* CHART 5: Absentism */}
+          {(activeTab === 'all' || activeTab === 'operations') && (
+            <div className="rounded-2xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs hover:border-gray-200 transition-all" id="chart-absenteeism">
+              <div className="flex items-center justify-between border-b border-gray-50 dark:border-slate-800/50 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400">
+                    <UserCheck className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-sans text-xs font-black text-gray-900 dark:text-slate-100">Operator Absenteeism</h3>
+                    <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase">Operator absence rate (%)</p>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Reject category distribution */}
-            <div className="mt-5 space-y-4">
-              <div className="space-y-3">
-                {REJECT_ANALYSIS_DATA.map((item, idx) => {
-                  const maxVal = 50;
-                  const percent = (item.value1 / maxVal) * 100;
-                  
-                  return (
-                    <div 
-                      key={idx} 
-                      className="space-y-1.5 cursor-pointer"
-                      onMouseEnter={() => setHoveredRejectIndex(idx)}
-                      onMouseLeave={() => setHoveredRejectIndex(null)}
-                    >
-                      <div className="flex items-center justify-between text-xs font-bold text-gray-700">
-                        <span className="flex items-center gap-1.5">
-                          <span className="h-2 w-2 rounded-full bg-red-600" />
-                          {item.label}
-                        </span>
-                        <span className="font-mono text-red-700">
-                          {item.value1} cases
-                        </span>
+              <div className="mt-4 relative">
+                <div className="flex items-end justify-between h-32 gap-2 pt-2">
+                  {absenteeismData.map((d, i) => {
+                    const h1 = `${(d.value1 / 8) * 100}%`;
+                    return (
+                      <div key={i} className="flex-1 flex flex-col items-center gap-1.5 group relative">
+                        <div className="w-full flex justify-center items-end h-24">
+                          <div 
+                            className="w-5 rounded-t-md bg-amber-500 hover:bg-amber-600 transition-all" 
+                            style={{ height: h1 }} 
+                            title={`Absenteeism: ${d.value1}%`}
+                          />
+                        </div>
+                        <span className="text-[9px] font-bold text-gray-400 dark:text-slate-500">Floor {i+1}</span>
                       </div>
-                      <div className="h-2.5 w-full rounded-full bg-gray-100">
-                        <div 
-                          className={`h-full rounded-full bg-red-500 transition-all duration-300 ${
-                            hoveredRejectIndex === idx ? 'bg-red-600 shadow-sm' : ''
-                          }`}
-                          style={{ width: `${percent}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* QA action notice */}
-              <div className="rounded-xl border border-red-100 bg-red-50/40 p-3 flex items-start gap-2 text-[11px] text-red-900 font-medium">
-                <AlertTriangle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
-                <p>
-                  <strong>Yarn Defect</strong> continues to represent 38% of reject scrap material. Production team should coordinate with yarn warehouse inspection immediately.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* CHART 5: Floor Comparison */}
-        {activeTab === 'all' && (
-          <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-xs" id="chart-card-floor-comparison">
-            <div className="flex items-center justify-between border-b border-gray-50 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
-                  <Layers className="h-4 w-4" />
-                </div>
-                <div>
-                  <h3 className="font-sans text-sm font-black text-gray-900">Floor Production comparison</h3>
-                  <p className="text-[10px] font-semibold text-gray-400 uppercase">Yield comparison across all 6 knitting floors</p>
+                    );
+                  })}
                 </div>
               </div>
             </div>
+          )}
 
-            {/* Floor columns */}
-            <div className="mt-5 space-y-4">
-              <div className="flex items-end justify-between gap-3 h-28">
-                {INITIAL_FLOORS.map((floor, idx) => {
-                  const maxTarget = 25000;
-                  const prodHeight = `${(floor.productionKg / maxTarget) * 100}%`;
-                  const targetHeight = `${(floor.targetKg / maxTarget) * 100}%`;
-
-                  return (
-                    <div key={idx} className="flex flex-col items-center gap-2 flex-1 group relative">
-                      {/* Grid and stacked columns */}
-                      <div className="relative w-full flex items-end justify-center h-24 gap-1">
-                        {/* Target line guideline */}
-                        <div 
-                          className="absolute w-full border-t border-dashed border-gray-400 z-0 pointer-events-none opacity-50"
-                          style={{ bottom: targetHeight }}
-                          title={`Target: ${floor.targetKg}`}
-                        />
-
-                        {/* Actual yield column */}
-                        <div 
-                          className="w-5 rounded-t bg-blue-700 group-hover:bg-blue-800 transition-colors z-10"
-                          style={{ height: prodHeight }}
-                        />
-                      </div>
-                      <span className="text-[9px] font-bold text-gray-500 text-center uppercase tracking-tight">{floor.name}</span>
-                    </div>
-                  );
-                })}
-              </div>
-              
-              <div className="flex justify-center gap-4 text-[10px] font-bold text-gray-400">
-                <span className="flex items-center gap-1.5"><span className="h-0.5 w-3 border-t border-dashed border-gray-400" /> Target Plan</span>
-                <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-xs bg-blue-700" /> Knitted Output</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* CHART 6: Daily Shift Performance */}
-        {activeTab === 'all' && (
-          <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-xs" id="chart-card-shift-performance">
-            <div className="flex items-center justify-between border-b border-gray-50 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-50 text-slate-600">
-                  <Clock className="h-4 w-4" />
+          {/* CHART 6: Set Change */}
+          {(activeTab === 'all' || activeTab === 'operations') && (
+            <div className="rounded-2xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs hover:border-gray-200 transition-all" id="chart-set-change">
+              <div className="flex items-center justify-between border-b border-gray-50 dark:border-slate-800/50 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400">
+                    <Shuffle className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-sans text-xs font-black text-gray-900 dark:text-slate-100">Set Changeover Speed</h3>
+                    <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase">Cylinder set-up change minutes</p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="font-sans text-sm font-black text-gray-900">Shift Performance Analysis</h3>
-                  <p className="text-[10px] font-semibold text-gray-400 uppercase">Target vs Actual output by 8-hour shift rosters</p>
+              </div>
+
+              <div className="mt-4 relative">
+                <div className="flex items-end justify-between h-32 gap-2 pt-2">
+                  {setChangeData.map((d, i) => {
+                    const h1 = `${(d.value1 / 90) * 100}%`;
+                    return (
+                      <div key={i} className="flex-1 flex flex-col items-center gap-1.5 group relative">
+                        <div className="w-full flex justify-center items-end h-24">
+                          <div 
+                            className="w-4 rounded-t-md bg-purple-500 hover:bg-purple-600 transition-all" 
+                            style={{ height: h1 }} 
+                            title={`Change speed: ${d.value1} mins`}
+                          />
+                        </div>
+                        <span className="text-[9px] font-bold text-gray-400 dark:text-slate-500">Set {i+1}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
+          )}
 
-            {/* Shift side by side comparison */}
-            <div className="mt-5 space-y-4">
-              <div className="space-y-3.5">
-                {SHIFT_PERFORMANCE_DATA.map((shift, idx) => {
-                  const targetPct = 100;
-                  const actualPct = (shift.value2 / shift.value1) * 100;
+          {/* ==========================================================
+              CATEGORY 3: ASSET CONSUMABLES
+             ========================================================== */}
 
-                  return (
-                    <div key={idx} className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs font-bold text-gray-700">
-                        <span>{shift.label}</span>
-                        <span className="font-mono text-gray-500">
-                          {shift.value2.toLocaleString()} / {shift.value1.toLocaleString()} Kg ({Math.round(actualPct)}%)
-                        </span>
-                      </div>
-                      <div className="relative h-3 w-full rounded-full bg-gray-100 overflow-hidden">
-                        {/* Target guideline in bar */}
-                        <div 
-                          className="absolute top-0 bottom-0 left-0 bg-blue-200 transition-all duration-300"
-                          style={{ width: `${targetPct}%` }}
-                        />
-                        {/* Actual bar */}
-                        <div 
-                          className={`absolute top-0 bottom-0 left-0 rounded-full transition-all duration-300 ${
-                            actualPct >= 95 ? 'bg-emerald-500' : 'bg-amber-400'
-                          }`}
-                          style={{ width: `${Math.min(actualPct, 100)}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
+          {/* CHART 7: Needle */}
+          {(activeTab === 'all' || activeTab === 'consumables') && (
+            <div className="rounded-2xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs hover:border-gray-200 transition-all" id="chart-needle-consumption">
+              <div className="flex items-center justify-between border-b border-gray-50 dark:border-slate-800/50 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-50 dark:bg-teal-950/40 text-teal-600 dark:text-teal-400">
+                    <Wrench className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-sans text-xs font-black text-gray-900 dark:text-slate-100">Needle Consumption</h3>
+                    <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase">Needle wear & tear rate (Pcs)</p>
+                  </div>
+                </div>
               </div>
 
-              {/* Status footer for Shift */}
-              <div className="flex items-center justify-between text-[10px] font-bold text-gray-400 uppercase">
-                <span>Roster Shift: 24h continuous</span>
-                <span className="text-emerald-600">Shift B Outperformed target by 2%</span>
+              <div className="mt-4 relative">
+                <div className="flex items-end justify-between h-32 gap-1.5 pt-2">
+                  {needleData.map((d, i) => {
+                    const maxVal = Math.max(...needleData.map(x => x.value1)) || 200;
+                    const h1 = `${(d.value1 / maxVal) * 100}%`;
+                    return (
+                      <div key={i} className="flex-1 flex flex-col items-center gap-1.5 group relative">
+                        <div className="w-full flex justify-center items-end h-24">
+                          <div 
+                            className="w-4 rounded-t bg-teal-500 hover:bg-teal-600 transition-all" 
+                            style={{ height: h1 }} 
+                            title={`Wear: ${d.value1} Pcs`}
+                          />
+                        </div>
+                        <span className="text-[9px] font-bold text-gray-400 dark:text-slate-500">{d.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
-          </div>
-        )}
-      </div>
+          )}
+
+          {/* CHART 8: Sinker */}
+          {(activeTab === 'all' || activeTab === 'consumables') && (
+            <div className="rounded-2xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs hover:border-gray-200 transition-all" id="chart-sinker-replacement">
+              <div className="flex items-center justify-between border-b border-gray-50 dark:border-slate-800/50 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-orange-50 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400">
+                    <ShieldAlert className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-sans text-xs font-black text-gray-900 dark:text-slate-100">Sinker Replacement</h3>
+                    <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase">Sinker wear rate (Pcs)</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 relative">
+                <div className="flex items-end justify-between h-32 gap-1.5 pt-2">
+                  {sinkerData.map((d, i) => {
+                    const maxVal = Math.max(...sinkerData.map(x => x.value1)) || 150;
+                    const h1 = `${(d.value1 / maxVal) * 100}%`;
+                    return (
+                      <div key={i} className="flex-1 flex flex-col items-center gap-1.5 group relative">
+                        <div className="w-full flex justify-center items-end h-24">
+                          <div 
+                            className="w-4 rounded-t bg-orange-500 hover:bg-orange-600 transition-all" 
+                            style={{ height: h1 }} 
+                            title={`Sinker Wear: ${d.value1} Pcs`}
+                          />
+                        </div>
+                        <span className="text-[9px] font-bold text-gray-400 dark:text-slate-500">{d.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* CHART 9: Oil */}
+          {(activeTab === 'all' || activeTab === 'consumables') && (
+            <div className="rounded-2xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs hover:border-gray-200 transition-all" id="chart-oil-consumption">
+              <div className="flex items-center justify-between border-b border-gray-50 dark:border-slate-800/50 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                    <Droplet className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-sans text-xs font-black text-gray-900 dark:text-slate-100">Oil Lubrication</h3>
+                    <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase">Cylinder lubrication (Liters)</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 relative">
+                <div className="flex items-end justify-between h-32 gap-1.5 pt-2">
+                  {oilData.map((d, i) => {
+                    const maxVal = Math.max(...oilData.map(x => x.value1)) || 200;
+                    const h1 = `${(d.value1 / maxVal) * 100}%`;
+                    return (
+                      <div key={i} className="flex-1 flex flex-col items-center gap-1.5 group relative">
+                        <div className="w-full flex justify-center items-end h-24">
+                          <div 
+                            className="w-4 rounded-t bg-slate-500 hover:bg-slate-600 transition-all" 
+                            style={{ height: h1 }} 
+                            title={`Oil: ${d.value1} Ltrs`}
+                          />
+                        </div>
+                        <span className="text-[9px] font-bold text-gray-400 dark:text-slate-500">{d.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+        </div>
+      )}
     </div>
   );
 }

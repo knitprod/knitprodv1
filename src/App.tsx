@@ -16,7 +16,8 @@ import {
   LogOut,
   Sun,
   Moon,
-  Table
+  Table,
+  Info
 } from 'lucide-react';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
@@ -30,6 +31,7 @@ import ReportsView from './components/ReportsView';
 import UserManagementView from './components/UserManagementView';
 import SettingsView from './components/SettingsView';
 import ProductionLedgerView from './components/ProductionLedgerView';
+import DashboardFilterToolbar, { FilterState } from './components/DashboardFilterToolbar';
 
 import { FactoryFloor, ProductionEntry, ActivityLog } from './types';
 import { INITIAL_FLOORS, INITIAL_KPIS, INITIAL_ACTIVITY_LOGS } from './data';
@@ -102,6 +104,15 @@ const INITIAL_ENTRIES: ProductionEntry[] = [
     remarks: 'Awaiting motor calibration.',
   },
 ];
+
+const getRelativeDateString = (daysOffset: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() - daysOffset);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState<string>('Dashboard');
@@ -222,10 +233,191 @@ export default function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Compute live cumulative KPIs dynamically based on current floors state
+  // Dashboard filtering state
+  const [filterState, setFilterState] = useState<FilterState>(() => {
+    const yesterday = getRelativeDateString(1);
+    const sevenDaysAgo = getRelativeDateString(7);
+    return {
+      unit: 'EKL',
+      dateMode: 'single',
+      singleDate: yesterday, // Default to Today()-1 (Yesterday)
+      dateFrom: sevenDaysAgo,
+      dateTo: yesterday,
+      month: yesterday.substring(0, 7),
+      year: yesterday.substring(0, 4)
+    };
+  });
+  const [dashboardLoading, setDashboardLoading] = useState<boolean>(false);
+
+  // Helper for seeded random comparisons
+  const getSeededValue = (combined: string, multiplier: number, offset: number) => {
+    let hash = 0;
+    for (let i = 0; i < combined.length; i++) {
+      hash = combined.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return Math.abs(Math.sin(hash) * multiplier) + offset;
+  };
+
+  // Compute live cumulative KPIs dynamically based on current filters and state
   const kpis = useMemo(() => {
-    return INITIAL_KPIS(floors);
-  }, [floors]);
+    const { unit, dateMode } = filterState;
+    
+    // Determine base values
+    let baseTarget = 25000;
+    let baseProd = 24150;
+    let running = 45;
+    let total = 48;
+    let capacity = 93.8;
+    let efficiency = 94.2;
+
+    if (unit === 'EKL') {
+      baseTarget = 25000; baseProd = 24150; running = 45; total = 48; capacity = 93.8; efficiency = 94.2;
+    } else if (unit === 'EFL') {
+      baseTarget = 20000; baseProd = 19400; running = 38; total = 40; capacity = 95.0; efficiency = 95.1;
+    } else if (unit === 'EFL-2') {
+      baseTarget = 18000; baseProd = 15120; running = 29; total = 35; capacity = 82.8; efficiency = 82.8;
+    } else if (unit === 'Auto Stripe') {
+      baseTarget = 12000; baseProd = 11520; running = 18; total = 20; capacity = 90.0; efficiency = 92.5;
+    } else if (unit === 'EFL-Extension') {
+      baseTarget = 15000; baseProd = 10800; running = 17; total = 25; capacity = 68.0; efficiency = 69.4;
+    } else if (unit === 'ESL-Extension') {
+      baseTarget = 10000; baseProd = 9550; running = 14; total = 16; capacity = 87.5; efficiency = 91.8;
+    } else if (unit === 'Sub-Contact') {
+      baseTarget = 8000; baseProd = 7420; running = 12; total = 14; capacity = 85.7; efficiency = 90.2;
+    } else {
+      baseTarget = 108000; baseProd = 100540; running = 202; total = 218; capacity = 87.5; efficiency = 88.5;
+    }
+
+    // Determine deterministic fluctuation based on selected date
+    let dateStr = filterState.singleDate;
+    if (dateMode === 'range') dateStr = `${filterState.dateFrom}_${filterState.dateTo}`;
+    else if (dateMode === 'month') dateStr = filterState.month;
+    else if (dateMode === 'year') dateStr = filterState.year;
+
+    let hash = 0;
+    for (let i = 0; i < dateStr.length; i++) {
+      hash = dateStr.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const randomFactor = Math.abs(Math.sin(hash)) * 0.15 + 0.9; // range 0.9 to 1.05
+    const multiplier = parseFloat(randomFactor.toFixed(3));
+
+    // Scale targets and productions based on period size
+    let periodScale = 1.0;
+    if (dateMode === 'range') {
+      const d1 = new Date(filterState.dateFrom);
+      const d2 = new Date(filterState.dateTo);
+      const diff = Math.max(1, Math.round((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+      periodScale = diff;
+    } else if (dateMode === 'month') {
+      periodScale = 30.0;
+    } else if (dateMode === 'year') {
+      periodScale = 365.0;
+    }
+
+    const finalTarget = Math.round(baseTarget * multiplier * periodScale);
+    const finalProd = Math.round(baseProd * multiplier * periodScale);
+    const finalAchievement = finalTarget > 0 ? parseFloat(((finalProd / finalTarget) * 100).toFixed(1)) : 0;
+    
+    // Comparison labels based on selected Date Mode
+    let compLabel = 'vs yesterday';
+    if (dateMode === 'range') compLabel = 'vs prev period';
+    else if (dateMode === 'month') compLabel = 'vs prev month';
+    else if (dateMode === 'year') compLabel = 'vs prev year';
+
+    const compValueVal = (getSeededValue(dateStr + '_comp', 4, 1) * (hash % 2 === 0 ? 1 : -1)).toFixed(1);
+    const compSign = parseFloat(compValueVal) >= 0 ? '+' : '';
+
+    return [
+      {
+        id: 'target',
+        label: 'Target',
+        value: finalTarget.toLocaleString(),
+        unit: 'Kg',
+        description: 'Planned for the period',
+        change: `${compSign}${compValueVal}% ${compLabel}`,
+        isPositive: parseFloat(compValueVal) >= 0,
+        color: 'blue' as const,
+        iconName: 'Target'
+      },
+      {
+        id: 'production',
+        label: 'Production',
+        value: finalProd.toLocaleString(),
+        unit: 'Kg',
+        description: 'Actual knitted output',
+        change: `${compSign}${(parseFloat(compValueVal) * 0.9).toFixed(1)}% ${compLabel}`,
+        isPositive: parseFloat(compValueVal) >= 0,
+        color: 'green' as const,
+        iconName: 'Layers'
+      },
+      {
+        id: 'achievement',
+        label: 'Achievement %',
+        value: `${finalAchievement}%`,
+        description: 'Plan achievement rate',
+        change: `${compSign}${(parseFloat(compValueVal) * 0.5).toFixed(1)}% ${compLabel}`,
+        isPositive: parseFloat(compValueVal) >= 0,
+        color: 'green' as const,
+        iconName: 'TrendingUp'
+      },
+      {
+        id: 'machine_status',
+        label: 'Machine Status',
+        value: `${running} / ${total}`,
+        description: 'Active circular knitting frames',
+        change: 'Uptime stable',
+        isPositive: true,
+        color: 'blue' as const,
+        iconName: 'Cpu'
+      },
+      {
+        id: 'capacity',
+        label: 'Capacity Utilization',
+        value: `${(capacity * (multiplier > 1 ? 1 : multiplier)).toFixed(1)}%`,
+        description: 'Cylinder allocation quota',
+        change: 'Optimal utilization',
+        isPositive: true,
+        color: 'orange' as const,
+        iconName: 'Activity'
+      },
+      {
+        id: 'efficiency',
+        label: 'Efficiency %',
+        value: `${(efficiency * (multiplier > 1 ? 1 : multiplier)).toFixed(1)}%`,
+        description: 'Average operating ratio',
+        change: 'Normal operating rate',
+        isPositive: true,
+        color: 'orange' as const,
+        iconName: 'Percent'
+      }
+    ];
+  }, [filterState]);
+
+  const handleApplyFilters = (newFilters: FilterState) => {
+    setDashboardLoading(true);
+    setTimeout(() => {
+      setFilterState(newFilters);
+      setDashboardLoading(false);
+    }, 600);
+  };
+
+  const handleResetFilters = () => {
+    setDashboardLoading(true);
+    setTimeout(() => {
+      const yesterday = getRelativeDateString(1);
+      const sevenDaysAgo = getRelativeDateString(7);
+      setFilterState({
+        unit: 'EKL',
+        dateMode: 'single',
+        singleDate: yesterday,
+        dateFrom: sevenDaysAgo,
+        dateTo: yesterday,
+        month: yesterday.substring(0, 7),
+        year: yesterday.substring(0, 4)
+      });
+      setDashboardLoading(false);
+    }, 600);
+  };
 
   // Handler: Drill down floor filter via sidebar click or notification click
   const handleSelectFloor = (floorId: string | null) => {
@@ -428,6 +620,14 @@ export default function App() {
                 {/* Large Welcome banner */}
                 <WelcomeBanner floors={floors} onNavigate={setCurrentPage} />
 
+                {/* ERP-grade Filter Toolbar */}
+                <DashboardFilterToolbar 
+                  onApplyFilters={handleApplyFilters}
+                  onResetFilters={handleResetFilters}
+                  defaultUnit={filterState.unit}
+                  defaultDate={filterState.singleDate}
+                />
+
                 {/* KPI metrics row */}
                 <KPICards kpis={kpis} />
 
@@ -441,7 +641,44 @@ export default function App() {
                     />
                     
                     {/* Integrated dashboard graphs */}
-                    <DashboardCharts />
+                    <DashboardCharts 
+                      filterUnit={filterState.unit}
+                      filterDateMode={filterState.dateMode}
+                      filterSingleDate={filterState.singleDate}
+                      filterDateFrom={filterState.dateFrom}
+                      filterDateTo={filterState.dateTo}
+                      filterMonth={filterState.month}
+                      filterYear={filterState.year}
+                      isLoading={dashboardLoading}
+                    />
+
+                    {/* Dynamic Summary Panel */}
+                    <div className="rounded-2xl border border-blue-100 bg-blue-50/20 dark:border-blue-900/30 dark:bg-blue-950/10 p-5 shadow-xs" id="dashboard-summary-panel">
+                      <h3 className="font-sans text-xs font-black uppercase tracking-wider text-[#0F4C81] dark:text-blue-400 flex items-center gap-1.5 mb-3">
+                        <Info className="h-4 w-4" />
+                        <span>Unit Summary & Directives Panel</span>
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-semibold text-gray-700 dark:text-slate-300">
+                        <div className="space-y-1.5 p-3 rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800">
+                          <span className="block text-[10px] font-bold text-gray-400 uppercase">Yield Status</span>
+                          <p>
+                            {filterState.unit} has completed <strong className="text-emerald-600 font-bold">{kpis[2].value}</strong> of its target plan during this period. Yield curve remains consistent with target profiles.
+                          </p>
+                        </div>
+                        <div className="space-y-1.5 p-3 rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800">
+                          <span className="block text-[10px] font-bold text-gray-400 uppercase">Quality Assessment</span>
+                          <p>
+                            Scrap rate is steady at <strong className="text-red-500 font-bold">1.4%</strong>. Active alerts count is normal. Tension adjustment on machine sets recommended.
+                          </p>
+                        </div>
+                        <div className="space-y-1.5 p-3 rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800">
+                          <span className="block text-[10px] font-bold text-gray-400 uppercase">Directives & Roster</span>
+                          <p>
+                            Shift supervisors must audit Lycra feeds every 4 hours. Ensure rigger speed for next-set changes remains under 45 minutes.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="lg:col-span-1">
@@ -467,7 +704,23 @@ export default function App() {
                 <FloorDashboardView
                   floors={floors}
                   selectedFloorId={selectedFloorId}
-                  onSelectFloor={setSelectedFloorId}
+                  onSelectFloor={(floorId) => {
+                    setSelectedFloorId(floorId);
+                    const mapping: Record<string, string> = {
+                      'ekl': 'EKL',
+                      'efl': 'EFL',
+                      'efl-2': 'EFL-2',
+                      'auto-stripe': 'Auto Stripe',
+                      'efl-ext': 'EFL-Extension',
+                      'esl-ext': 'ESL-Extension',
+                      'sub-contact': 'Sub-Contact'
+                    };
+                    if (floorId && mapping[floorId]) {
+                      setFilterState(prev => ({ ...prev, unit: mapping[floorId] }));
+                    }
+                  }}
+                  filterState={filterState}
+                  isLoading={dashboardLoading}
                 />
               </div>
             )}
@@ -482,7 +735,16 @@ export default function App() {
                     High-level aggregate target projections
                   </p>
                 </div>
-                <DashboardCharts />
+                <DashboardCharts 
+                  filterUnit={filterState.unit}
+                  filterDateMode={filterState.dateMode}
+                  filterSingleDate={filterState.singleDate}
+                  filterDateFrom={filterState.dateFrom}
+                  filterDateTo={filterState.dateTo}
+                  filterMonth={filterState.month}
+                  filterYear={filterState.year}
+                  isLoading={dashboardLoading}
+                />
               </div>
             )}
 
