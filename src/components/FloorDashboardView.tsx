@@ -24,7 +24,8 @@ import {
   Calendar
 } from 'lucide-react';
 import { FilterState } from './DashboardFilterToolbar';
-import { LedgerRecord, generateInitialLedger } from './ProductionLedgerView';
+import { LedgerRecord } from '../types';
+import { generateInitialLedger } from './ProductionLedgerView';
 
 const getRelativeDateString = (daysOffset: number) => {
   const d = new Date();

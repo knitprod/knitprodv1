@@ -18,6 +18,7 @@ import {
   Factory,
   Table
 } from 'lucide-react';
+import { UserRecord } from './UserManagementView';
 
 interface SidebarProps {
   currentPage: string;
@@ -25,6 +26,7 @@ interface SidebarProps {
   collapsed: boolean;
   setCollapsed: (collapsed: boolean) => void;
   onLogout: () => void;
+  currentUser?: UserRecord | null;
 }
 
 export default function Sidebar({ 
@@ -32,10 +34,12 @@ export default function Sidebar({
   onNavigate, 
   collapsed, 
   setCollapsed,
-  onLogout 
+  onLogout,
+  currentUser
 }: SidebarProps) {
 
-  const menuItems = [
+  // All available menu options
+  const allMenuItems = [
     { name: 'Dashboard', icon: Home, label: 'Dashboard' },
     { name: 'Production Ledger', icon: Table, label: 'Production Ledger' },
     { name: 'Floor Dashboard', icon: LayoutGrid, label: 'Floor Dashboard' },
@@ -44,6 +48,17 @@ export default function Sidebar({
     { name: 'User Management', icon: Users, label: 'User Management' },
     { name: 'Settings', icon: Settings, label: 'Settings' },
   ];
+
+  // Restrict User Management module strictly to Admin users, or respect "Hide" permission
+  const menuItems = allMenuItems.filter(item => {
+    if (currentUser?.allowedTabs) {
+      return currentUser.allowedTabs.includes(item.name);
+    }
+    if (item.name === 'User Management') {
+      return currentUser?.userType === 'Admin';
+    }
+    return true;
+  });
 
   return (
     <aside 

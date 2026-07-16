@@ -33,65 +33,13 @@ import {
   Settings,
   ShieldAlert,
   ArrowRight,
-  Plus
+  Plus,
+  RefreshCw
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { LedgerRecord } from '../types';
+import { GasClient } from '../lib/gasClient';
 
-// Define the full ledger record data structure matching all columns
-export interface LedgerRecord {
-  id: string;
-  date: string;       // YYYY-MM-DD
-  floor: string;      // EKL, EFL, EFL-2, Auto Stripe, EFL-Extension, ESL-Extension, Sub-Contact
-  month: string;      // Month name
-  year: number;       // Year
-
-  // Production
-  target: number;
-  shiftA: number;
-  shiftB: number;
-  shiftC: number;
-  totalProduction: number;
-
-  // Machine Performance
-  runningMachine: number;
-  idleMachine: number;
-  machineUtilization: number;  // (runningMachine / total) * 100
-  idleMachinePct: number;      // (idleMachine / total) * 100
-  idleProduction: number;      // lost production
-  efficiency: number;          // totalProduction / target * 100
-  productionPerMachine: number;// totalProduction / runningMachine
-
-  // Quality
-  reject: number;
-  rejectPct: number;           // reject / totalProduction * 100
-  hold: number;
-  holdPct: number;             // hold / totalProduction * 100
-
-  // Consumables
-  needleBroken: number;
-  needlePerKg: number;         // needleBroken / totalProduction
-  sinkerBroken: number;
-  oilConsumption: number;
-
-  // Performance
-  productionLossForEfficiency: number; // target - totalProduction (0 if negative)
-  capacityUtilization: number;         // capacity percentage
-
-  // Manpower
-  totalOperator: number;
-  absent: number;
-  absentPct: number;           // absent / totalOperator * 100
-
-  // Other
-  setChange: number;
-  remarks: string;
-
-  // Sub-Contact specific fields
-  productionFlatKnit?: number;
-  yarnIssued?: number;
-  runningFactories?: number;
-  fabricReturn?: number;
-}
 
 const getLocalStorageTarget = (floorName: string, defaultVal: number) => {
   if (typeof window !== 'undefined') {
@@ -230,9 +178,25 @@ export const generateInitialLedger = (): LedgerRecord[] => {
   return records;
 };
 
+const ensureUniqueIds = <T extends { id: string }>(items: T[], prefix: string): T[] => {
+  const seen = new Set<string>();
+  return items.map((item) => {
+    let uniqueId = item.id || `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
+    while (seen.has(uniqueId)) {
+      uniqueId = `${uniqueId}-${Math.floor(Math.random() * 1000)}`;
+    }
+    seen.add(uniqueId);
+    return { ...item, id: uniqueId };
+  });
+};
+
 export default function ProductionLedgerView() {
+  const [isGasMode, setIsGasMode] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [ledgerGasError, setLedgerGasError] = useState<string | null>(null);
+
   // Master database state
-  const [ledger, setLedger] = useState<LedgerRecord[]>(() => {
+  const [ledger, setLedgerRaw] = useState<LedgerRecord[]>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('knitting_production_ledger');
       if (saved) {
@@ -249,6 +213,48 @@ export default function ProductionLedgerView() {
     }
     return initial;
   });
+
+  const setLedger = (value: LedgerRecord[] | ((prev: LedgerRecord[]) => LedgerRecord[])) => {
+    setLedgerRaw((prev) => {
+      const next = typeof value === 'function' ? value(prev) : value;
+      return ensureUniqueIds(next, 'rec');
+    });
+  };
+
+  const loadGasLedger = async () => {
+    try {
+      setIsSyncing(true);
+      setLedgerGasError(null);
+      const records = await GasClient.fetchLedgerList();
+      setLedger(records);
+      triggerToast("Ledger data synchronized with Google Sheets successfully.");
+    } catch (e: any) {
+      console.error("Failed to load GAS ledger:", e);
+      const errMsg = e.message || "Failed to load from Google Sheets.";
+      setLedgerGasError(errMsg);
+      
+      // Fallback: load local mock database from localStorage
+      if (typeof window !== 'undefined') {
+        const saved = localStorage.getItem('knitting_production_ledger');
+        if (saved) {
+          try {
+            setLedger(JSON.parse(saved));
+          } catch (ex) {}
+        }
+      }
+      triggerToast("Ledger Sheets Integration is inactive. Falling back to Local Mock Database.");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  React.useEffect(() => {
+    const mode = GasClient.getDatabaseMode();
+    if (mode === 'gas') {
+      setIsGasMode(true);
+      loadGasLedger();
+    }
+  }, []);
 
   React.useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -713,11 +719,36 @@ export default function ProductionLedgerView() {
       return;
     }
 
-    // Add to list
-    setLedger((prev) => [creatingRecord, ...prev]);
-    setIsCreateModalOpen(false);
-    setCreatingRecord(null);
-    triggerToast(`Production record for ${creatingRecord.floor} on ${creatingRecord.date} has been successfully added to the ledger.`);
+    if (isGasMode) {
+      setIsSyncing(true);
+      GasClient.addLedgerEntry(creatingRecord)
+        .then((newId) => {
+          const recordWithRealId = { ...creatingRecord, id: newId };
+          setLedger((prev) => [recordWithRealId, ...prev]);
+          setIsCreateModalOpen(false);
+          setCreatingRecord(null);
+          triggerToast(`Production record for ${creatingRecord.floor} on ${creatingRecord.date} has been successfully saved to Google Sheets ledger.`);
+        })
+        .catch((err: any) => {
+          console.error("Failed to add ledger entry to GAS:", err);
+          // Fallback to local saving on error
+          const tempId = `local-${Date.now()}`;
+          const recordWithTempId = { ...creatingRecord, id: tempId };
+          setLedger((prev) => [recordWithTempId, ...prev]);
+          setIsCreateModalOpen(false);
+          setCreatingRecord(null);
+          triggerToast(`Google Sheets sync failed. Saved locally instead: ${err.message || "Server Error"}`);
+        })
+        .finally(() => {
+          setIsSyncing(false);
+        });
+    } else {
+      // Add to list
+      setLedger((prev) => [creatingRecord, ...prev]);
+      setIsCreateModalOpen(false);
+      setCreatingRecord(null);
+      triggerToast(`Production record for ${creatingRecord.floor} on ${creatingRecord.date} has been successfully added to the ledger.`);
+    }
   };
 
   // ----------------------------------------------------
@@ -780,11 +811,33 @@ export default function ProductionLedgerView() {
       return;
     }
 
-    // Update in list
-    setLedger((prev) => prev.map((r) => (r.id === editingRecord.id ? editingRecord : r)));
-    setIsEditModalOpen(false);
-    setEditingRecord(null);
-    triggerToast(`Production record for ${editingRecord.floor} on ${editingRecord.date} has been successfully updated.`);
+    if (isGasMode) {
+      setIsSyncing(true);
+      GasClient.updateLedgerEntry(editingRecord)
+        .then(() => {
+          setLedger((prev) => prev.map((r) => (r.id === editingRecord.id ? editingRecord : r)));
+          setIsEditModalOpen(false);
+          setEditingRecord(null);
+          triggerToast(`Production record for ${editingRecord.floor} on ${editingRecord.date} has been successfully updated in Google Sheets.`);
+        })
+        .catch((err: any) => {
+          console.error("Failed to update ledger entry in GAS:", err);
+          // Fallback to local editing on error
+          setLedger((prev) => prev.map((r) => (r.id === editingRecord.id ? editingRecord : r)));
+          setIsEditModalOpen(false);
+          setEditingRecord(null);
+          triggerToast(`Google Sheets update failed. Updated locally instead: ${err.message || "Server Error"}`);
+        })
+        .finally(() => {
+          setIsSyncing(false);
+        });
+    } else {
+      // Update in list
+      setLedger((prev) => prev.map((r) => (r.id === editingRecord.id ? editingRecord : r)));
+      setIsEditModalOpen(false);
+      setEditingRecord(null);
+      triggerToast(`Production record for ${editingRecord.floor} on ${editingRecord.date} has been successfully updated.`);
+    }
   };
 
   // ----------------------------------------------------
@@ -805,10 +858,32 @@ export default function ProductionLedgerView() {
     const targetRecord = ledger.find(r => r.id === deletingRecordId);
     const details = targetRecord ? `${targetRecord.floor} on ${targetRecord.date}` : '';
 
-    setLedger((prev) => prev.filter((r) => r.id !== deletingRecordId));
-    setIsDeleteConfirmOpen(false);
-    setDeletingRecordId(null);
-    triggerToast(`Production record for ${details} has been permanently purged.`);
+    if (isGasMode) {
+      setIsSyncing(true);
+      GasClient.deleteLedgerEntry(deletingRecordId)
+        .then(() => {
+          setLedger((prev) => prev.filter((r) => r.id !== deletingRecordId));
+          setIsDeleteConfirmOpen(false);
+          setDeletingRecordId(null);
+          triggerToast(`Production record for ${details} has been permanently purged from Google Sheets.`);
+        })
+        .catch((err: any) => {
+          console.error("Failed to delete ledger entry from GAS:", err);
+          // Fallback to local deletion on error
+          setLedger((prev) => prev.filter((r) => r.id !== deletingRecordId));
+          setIsDeleteConfirmOpen(false);
+          setDeletingRecordId(null);
+          triggerToast(`Google Sheets delete failed. Deleted locally instead: ${err.message || "Server Error"}`);
+        })
+        .finally(() => {
+          setIsSyncing(false);
+        });
+    } else {
+      setLedger((prev) => prev.filter((r) => r.id !== deletingRecordId));
+      setIsDeleteConfirmOpen(false);
+      setDeletingRecordId(null);
+      triggerToast(`Production record for ${details} has been permanently purged.`);
+    }
   };
 
   // ----------------------------------------------------
@@ -939,6 +1014,20 @@ export default function ProductionLedgerView() {
             )}
           </div>
           <div className="flex items-center gap-2">
+            {isGasMode && (
+              <button
+                onClick={loadGasLedger}
+                disabled={isSyncing}
+                className="flex items-center gap-1.5 px-3 py-1 text-xs font-bold text-blue-700 bg-blue-50 dark:text-blue-300 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900 rounded-lg hover:bg-blue-100/50 dark:hover:bg-blue-900/40 disabled:opacity-50 transition-colors cursor-pointer"
+                title="Synchronize ledger with Google Sheets"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                <span>{isSyncing ? 'Syncing...' : 'Sync Google Sheet'}</span>
+              </button>
+            )}
+            <span className="text-[10px] font-black uppercase bg-[#0F4C81]/15 text-[#0F4C81] dark:text-blue-300 dark:bg-blue-950/40 px-3 py-1 rounded-full border border-[#0F4C81]/20">
+              {isGasMode ? 'Database: Google Sheets (Live)' : 'Database: Local Mock DB'}
+            </span>
             <span className="text-[10px] font-black uppercase bg-[#0F4C81]/15 text-[#0F4C81] dark:text-blue-300 dark:bg-blue-950/40 px-3 py-1 rounded-full border border-[#0F4C81]/20">
               Role: Sr. Production Manager
             </span>

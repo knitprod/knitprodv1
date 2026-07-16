@@ -25,6 +25,7 @@ import {
   Moon
 } from 'lucide-react';
 import { ActivityLog } from '../types';
+import { UserRecord } from './UserManagementView';
 
 interface HeaderProps {
   notifications: ActivityLog[];
@@ -36,6 +37,7 @@ interface HeaderProps {
   setMobileMenuOpen: (open: boolean) => void;
   isDark: boolean;
   onToggleDark: () => void;
+  currentUser?: UserRecord | null;
 }
 
 export default function Header({ 
@@ -47,11 +49,13 @@ export default function Header({
   mobileMenuOpen,
   setMobileMenuOpen,
   isDark,
-  onToggleDark
+  onToggleDark,
+  currentUser
 }: HeaderProps) {
   const [time, setTime] = useState<string>('21:28:37');
   const [date, setDate] = useState<string>('Friday, July 10, 2026');
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showProfileDropdown, setShowProfileDropdown] = useState(false);
 
   // Live ticking clock as requested by "Current Time (Live Placeholder)"
   useEffect(() => {
@@ -224,18 +228,62 @@ export default function Header({
           <Settings className="h-5 w-5" />
         </button>
 
-        {/* User Profile Component */}
-        <div className="hidden md:flex items-center gap-2.5 border-l border-gray-100 dark:border-slate-800 pl-3 md:pl-5">
-          <div className="flex flex-col text-right">
-            <span className="text-xs font-bold text-gray-950 dark:text-slate-200">knitprod@gmail.com</span>
-            <span className="text-[10px] font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wider">
-              Sr. Production Manager
-            </span>
-          </div>
-          <div className="relative flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-indigo-700 text-sm font-black text-white shadow-sm ring-2 ring-blue-50 dark:ring-slate-800 hover:opacity-90 transition-opacity">
-            KM
-            <div className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white dark:border-slate-900 bg-emerald-500" />
-          </div>
+        {/* User Profile Component with Dropdown */}
+        <div className="relative hidden md:flex items-center">
+          <button 
+            onClick={() => setShowProfileDropdown(!showProfileDropdown)}
+            className="flex items-center gap-2.5 border-l border-gray-100 dark:border-slate-800 pl-3 md:pl-5 text-left cursor-pointer hover:opacity-95 transition-opacity"
+            id="user-profile-dropdown-trigger"
+          >
+            <div className="flex flex-col text-right">
+              <span className="text-xs font-bold text-gray-950 dark:text-slate-200">
+                {currentUser?.userName || 'Md. Raihan Hossain Antu'}
+              </span>
+              <span className="text-[10px] font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wider">
+                {currentUser?.designation || 'Sr. Production Manager'} ({currentUser?.uid || 'EKL001'})
+              </span>
+            </div>
+            <div className="relative flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-indigo-700 text-sm font-black text-white shadow-sm ring-2 ring-blue-50 dark:ring-slate-800">
+              {currentUser?.userName
+                ? currentUser.userName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()
+                : 'KM'
+              }
+              <div className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white dark:border-slate-900 bg-emerald-500" />
+            </div>
+          </button>
+
+          {showProfileDropdown && (
+            <>
+              <div 
+                className="fixed inset-0 z-40 bg-transparent" 
+                onClick={() => setShowProfileDropdown(false)}
+              />
+              <div className="absolute right-0 top-12 mt-1 w-64 rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-xl ring-1 ring-black/5 z-50 space-y-3 animate-fade-in">
+                <div className="pb-2.5 border-b border-slate-100 dark:border-slate-800">
+                  <span className="block text-xs font-black text-slate-950 dark:text-white">
+                    {currentUser?.userName || 'Md. Raihan Hossain Antu'}
+                  </span>
+                  <span className="block text-[10px] text-gray-400 dark:text-slate-400 font-bold uppercase tracking-wider mt-0.5">
+                    {currentUser?.designation || 'Sr. Production Manager'}
+                  </span>
+                  <span className="block text-[9px] text-gray-400 dark:text-slate-500 font-bold uppercase tracking-wide">
+                    Dept: {currentUser?.department || 'Knitting'} • UID: {currentUser?.uid || 'EKL001'}
+                  </span>
+                </div>
+                
+                <button
+                  onClick={() => {
+                    setShowProfileDropdown(false);
+                    if (onLogout) onLogout();
+                  }}
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-red-50 hover:bg-red-100 dark:bg-red-950/20 dark:hover:bg-red-950/45 text-red-600 dark:text-red-400 py-2 text-xs font-bold transition-all cursor-pointer uppercase tracking-wider"
+                >
+                  <LogOut className="h-4 w-4" />
+                  <span>Logout Session</span>
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </header>

@@ -17,7 +17,8 @@ import {
   Sun,
   Moon,
   Table,
-  Info
+  Info,
+  ShieldAlert
 } from 'lucide-react';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
@@ -28,10 +29,12 @@ import DashboardCharts from './components/DashboardCharts';
 import RightPanel from './components/RightPanel';
 import FloorDashboardView from './components/FloorDashboardView';
 import ReportsView from './components/ReportsView';
-import UserManagementView from './components/UserManagementView';
+import UserManagementView, { UserRecord } from './components/UserManagementView';
+import LoginView from './components/LoginView';
 import SettingsView from './components/SettingsView';
 import ProductionLedgerView from './components/ProductionLedgerView';
 import DashboardFilterToolbar, { FilterState } from './components/DashboardFilterToolbar';
+import { GasClient } from './lib/gasClient';
 
 import { FactoryFloor, ProductionEntry, ActivityLog } from './types';
 import { INITIAL_FLOORS, INITIAL_KPIS, INITIAL_ACTIVITY_LOGS } from './data';
@@ -114,11 +117,38 @@ const getRelativeDateString = (daysOffset: number) => {
   return `${yyyy}-${mm}-${dd}`;
 };
 
+const ensureUniqueIds = <T extends { id: string }>(items: T[], prefix: string): T[] => {
+  const seen = new Set<string>();
+  return items.map((item) => {
+    let uniqueId = item.id || `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
+    while (seen.has(uniqueId)) {
+      uniqueId = `${uniqueId}-${Math.floor(Math.random() * 1000)}`;
+    }
+    seen.add(uniqueId);
+    return { ...item, id: uniqueId };
+  });
+};
+
 export default function App() {
+  const [currentUser, setCurrentUser] = useState<UserRecord | null>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('active_knitting_user');
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch (e) {
+          console.error("Failed to parse active user:", e);
+        }
+      }
+    }
+    return null;
+  });
+
   const [currentPage, setCurrentPage] = useState<string>('Dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [selectedFloorId, setSelectedFloorId] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState<boolean>(false);
 
   // Dark mode state with local storage persistence
   const [isDark, setIsDark] = useState<boolean>(() => {
@@ -135,6 +165,16 @@ export default function App() {
       localStorage.setItem('theme', 'light');
     }
   }, [isDark]);
+
+  // Redirect to first allowed tab if current page is hidden by allowedTabs configuration
+  useEffect(() => {
+    if (currentUser?.allowedTabs) {
+      if (!currentUser.allowedTabs.includes(currentPage)) {
+        const firstAllowed = currentUser.allowedTabs.length > 0 ? currentUser.allowedTabs[0] : 'Dashboard';
+        setCurrentPage(firstAllowed);
+      }
+    }
+  }, [currentPage, currentUser]);
 
   const handleToggleDark = () => {
     setIsDark((prev) => !prev);
@@ -177,8 +217,83 @@ export default function App() {
     });
   });
 
-  const [productionEntries, setProductionEntries] = useState<ProductionEntry[]>(INITIAL_ENTRIES);
-  const [activityLogs, setActivityLogs] = useState<ActivityLog[]>(INITIAL_ACTIVITY_LOGS);
+  const [productionEntries, setProductionEntriesRaw] = useState<ProductionEntry[]>(INITIAL_ENTRIES);
+  const [activityLogs, setActivityLogsRaw] = useState<ActivityLog[]>(INITIAL_ACTIVITY_LOGS);
+
+  const setProductionEntries = (value: ProductionEntry[] | ((prev: ProductionEntry[]) => ProductionEntry[])) => {
+    setProductionEntriesRaw((prev) => {
+      const next = typeof value === 'function' ? value(prev) : value;
+      return ensureUniqueIds(next, 'ent');
+    });
+  };
+
+  const setActivityLogs = (value: ActivityLog[] | ((prev: ActivityLog[]) => ActivityLog[])) => {
+    setActivityLogsRaw((prev) => {
+      const next = typeof value === 'function' ? value(prev) : value;
+      return ensureUniqueIds(next, 'log');
+    });
+  };
+
+  const [gasSyncError, setGasSyncError] = useState<string | null>(null);
+
+  // Google Apps Script real-time sync loader
+  const loadLiveGasData = async () => {
+    if (GasClient.getDatabaseMode() !== 'gas') return;
+    
+    try {
+      setDashboardLoading(true);
+      // Fetch dynamic dashboard calculation from the GAS REST API
+      const dashboardRes = await GasClient.fetchDashboard({ unit: 'all' });
+      if (dashboardRes && Array.isArray(dashboardRes.floors)) {
+        // Map GAS floor calculations to factory floor states
+        const gasFloors = dashboardRes.floors;
+        setFloors((prevFloors) =>
+          prevFloors.map((floor) => {
+            const gasFloor = gasFloors.find((f: any) => f.name.toLowerCase() === floor.name.toLowerCase() || f.id === floor.id);
+            if (gasFloor) {
+              return {
+                ...floor,
+                productionKg: gasFloor.productionKg || 0,
+                targetKg: gasFloor.targetKg || floor.targetKg,
+                totalMachines: gasFloor.totalMachines || floor.totalMachines,
+                runningMachines: gasFloor.runningMachines || floor.runningMachines,
+                idleMachines: (gasFloor.totalMachines || floor.totalMachines) - (gasFloor.runningMachines || floor.runningMachines),
+                achievementPct: gasFloor.achievementPct || 0,
+                rejectPct: gasFloor.rejectPct || 0,
+                lastUpdated: 'Synced live'
+              };
+            }
+            return floor;
+          })
+        );
+      }
+
+      // Fetch dynamic live production records
+      const productionRes = await GasClient.fetchProductionList();
+      if (productionRes && Array.isArray(productionRes)) {
+        setProductionEntries(productionRes);
+      }
+
+      // Fetch dynamic activity logs
+      const activityRes = await GasClient.fetchActivityLogs();
+      if (activityRes && Array.isArray(activityRes)) {
+        setActivityLogs(activityRes);
+      }
+      setGasSyncError(null);
+    } catch (err: any) {
+      console.error("Failed to fetch live GAS REST API data:", err);
+      setGasSyncError(err.message || String(err));
+    } finally {
+      setDashboardLoading(false);
+    }
+  };
+
+  // Synchronize with Google Sheets whenever user navigates or refreshes
+  useEffect(() => {
+    if (GasClient.getDatabaseMode() === 'gas') {
+      loadLiveGasData();
+    }
+  }, [currentPage]);
 
   // Sync floor targets and machines configuration dynamically when page or settings change
   useEffect(() => {
@@ -426,7 +541,36 @@ export default function App() {
   };
 
   // Handler: Record new fabric roll submission
-  const handleAddProductionEntry = (newEntry: Omit<ProductionEntry, 'id' | 'timestamp'>) => {
+  const handleAddProductionEntry = async (newEntry: Omit<ProductionEntry, 'id' | 'timestamp'>) => {
+    const isGasMode = GasClient.getDatabaseMode() === 'gas';
+    if (isGasMode) {
+      try {
+        setDashboardLoading(true);
+        const saved = await GasClient.addProductionEntry({
+          floorId: newEntry.floorId,
+          machineId: newEntry.machineId,
+          operatorName: newEntry.operatorName,
+          shift: newEntry.shift,
+          yarnType: newEntry.yarnType,
+          fabricType: newEntry.fabricType,
+          productionKg: newEntry.productionKg,
+          rejectKg: newEntry.rejectKg,
+          remarks: newEntry.remarks
+        });
+        if (saved) {
+          await loadLiveGasData();
+        } else {
+          throw new Error("Invalid response received from Apps Script REST API");
+        }
+      } catch (err: any) {
+        console.error("GAS submit production entry error:", err);
+        alert(`Failed to save production log live to Google Sheets: ${err.message || err}. Please ensure your Web App URL is connected in Settings.`);
+      } finally {
+        setDashboardLoading(false);
+      }
+      return;
+    }
+
     const now = new Date();
     const timestamp = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
     const newId = `ent-${productionEntries.length + 1}`;
@@ -472,12 +616,28 @@ export default function App() {
     );
   };
 
-  // Handler: Simulated User Logout
+  // Handler: Authenticated User Logout
   const handleLogout = () => {
-    if (window.confirm('Are you sure you want to exit Epyllion Knitting System?')) {
-      alert('Session Terminated. Re-authenticating with enterprise active directory...');
-    }
+    setShowLogoutConfirm(true);
   };
+
+  const executeLogout = () => {
+    localStorage.removeItem('active_knitting_user');
+    setCurrentUser(null);
+    setCurrentPage('Dashboard');
+    setShowLogoutConfirm(false);
+  };
+
+  if (!currentUser) {
+    return (
+      <LoginView 
+        onLoginSuccess={(user) => {
+          localStorage.setItem('active_knitting_user', JSON.stringify(user));
+          setCurrentUser(user);
+        }} 
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50/50 dark:bg-slate-950 font-sans text-gray-900 dark:text-slate-100 antialiased transition-colors duration-200">
@@ -492,6 +652,7 @@ export default function App() {
         setMobileMenuOpen={setMobileMenuOpen}
         isDark={isDark}
         onToggleDark={handleToggleDark}
+        currentUser={currentUser}
       />
 
       {/* Responsive Mobile Drawer Navigation Menu */}
@@ -508,15 +669,22 @@ export default function App() {
               <div className="flex items-center gap-3 border-b border-blue-900/40 pb-4 pt-4">
                 {/* User Avatar */}
                 <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-indigo-700 text-sm font-black text-white shadow-sm ring-2 ring-blue-500/25">
-                  KM
+                  {currentUser?.userName
+                    ? currentUser.userName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()
+                    : 'KM'
+                  }
                   <div className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-[#0A192F] bg-emerald-500" />
                 </div>
                 
                 {/* User Details */}
                 <div className="flex-1 min-w-0">
                   <span className="block text-[9px] font-bold uppercase tracking-wider text-blue-400">Enterprise Navigation</span>
-                  <span className="block text-xs font-bold text-blue-100 truncate">knitprod@gmail.com</span>
-                  <span className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wide truncate">Sr. Production Manager</span>
+                  <span className="block text-xs font-bold text-blue-100 truncate">
+                    {currentUser?.userName || 'Md. Raihan Hossain Antu'}
+                  </span>
+                  <span className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wide truncate">
+                    {currentUser?.designation || 'Sr. Production Manager'} ({currentUser?.uid || 'EKL001'})
+                  </span>
                 </div>
                 
                 {/* Actions: Theme Toggle & Close Menu */}
@@ -548,7 +716,15 @@ export default function App() {
                   { name: 'Reports', icon: FileText, label: 'Reports' },
                   { name: 'User Management', icon: Users, label: 'User Management' },
                   { name: 'Settings', icon: Settings, label: 'Settings' },
-                ].map((item) => {
+                ].filter((item) => {
+                  if (currentUser?.allowedTabs) {
+                    return currentUser.allowedTabs.includes(item.name);
+                  }
+                  if (item.name === 'User Management') {
+                    return currentUser?.userType === 'Admin';
+                  }
+                  return true;
+                }).map((item) => {
                   const Icon = item.icon;
                   const isActive = currentPage === item.name;
 
@@ -604,6 +780,7 @@ export default function App() {
           collapsed={sidebarCollapsed}
           setCollapsed={setSidebarCollapsed}
           onLogout={handleLogout}
+          currentUser={currentUser}
         />
 
         {/* Main Workspace Frame */}
@@ -777,6 +954,46 @@ export default function App() {
           </div>
         </main>
       </div>
+      {/* Logout Confirmation Modal Overlay */}
+      {showLogoutConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div 
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity" 
+            onClick={() => setShowLogoutConfirm(false)}
+          />
+          <div className="relative w-full max-w-md transform rounded-2xl bg-white dark:bg-slate-900 p-6 shadow-2xl border border-slate-200 dark:border-slate-800 transition-all animate-scale-up">
+            <div className="flex flex-col items-center text-center space-y-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-50 dark:bg-red-950/45 text-red-600 dark:text-red-400">
+                <LogOut className="h-6 w-6" />
+              </div>
+              <div className="space-y-1.5">
+                <h3 className="font-sans text-base font-black tracking-tight text-gray-900 dark:text-white uppercase">
+                  Log Out Confirmation
+                </h3>
+                <p className="text-xs font-semibold text-gray-400 dark:text-slate-400 leading-normal">
+                  Are you sure you want to exit the Epyllion Knitting Performance System? This will terminate your active directory session.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3 w-full pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowLogoutConfirm(false)}
+                  className="rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 py-2.5 text-xs font-bold text-gray-700 dark:text-slate-200 hover:bg-gray-50 dark:hover:bg-slate-700 transition-all cursor-pointer uppercase tracking-wider"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={executeLogout}
+                  className="rounded-xl bg-red-600 hover:bg-red-700 py-2.5 text-xs font-black text-white transition-all shadow-md active:scale-98 cursor-pointer uppercase tracking-wider"
+                >
+                  Yes, Log Out
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

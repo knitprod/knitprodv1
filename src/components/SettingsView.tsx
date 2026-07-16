@@ -4,7 +4,8 @@
  */
 
 import React, { useState } from 'react';
-import { Settings, Save, AlertTriangle, Image, Mail, Cpu, Sparkles, CheckCircle } from 'lucide-react';
+import { Settings, Save, AlertTriangle, Image, Mail, Cpu, Sparkles, CheckCircle, Database, Wifi, Loader2 } from 'lucide-react';
+import { GasClient } from '../lib/gasClient';
 
 export default function SettingsView() {
   const [rejectThreshold, setRejectThreshold] = useState(() => localStorage.getItem('setting_rejectThreshold') || '2.5');
@@ -27,11 +28,61 @@ export default function SettingsView() {
   const [machinesEFLExt, setMachinesEFLExt] = useState(() => localStorage.getItem('total_machines_EFL-Extension') || '25');
   const [machinesESLExt, setMachinesESLExt] = useState(() => localStorage.getItem('total_machines_ESL-Extension') || '16');
 
+  // Google Apps Script Database integration states
+  const [databaseMode, setDatabaseMode] = useState<'mock' | 'gas'>(() => GasClient.getDatabaseMode());
+  const [gasWebAppUrl, setGasWebAppUrl] = useState(() => GasClient.getWebAppUrl());
+  const [isTesting, setIsTesting] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
+  const [testSuccess, setTestSuccess] = useState<boolean | null>(null);
+
   const [isSaved, setIsSaved] = useState(false);
+
+  const handleTestConnection = async () => {
+    if (!gasWebAppUrl.trim()) {
+      setTestSuccess(false);
+      setTestResult("Please provide a valid Google Apps Script Web App URL first.");
+      return;
+    }
+
+    setIsTesting(true);
+    setTestResult(null);
+    setTestSuccess(null);
+
+    try {
+      // Temporarily write to retrieve health check
+      const tempUrl = gasWebAppUrl.trim();
+      const separator = tempUrl.includes('?') ? '&' : '?';
+      const testUrl = `${tempUrl}${separator}action=health`;
+      
+      const res = await fetch(testUrl, { mode: 'cors' });
+      if (!res.ok) {
+        throw new Error(`HTTP status: ${res.status}`);
+      }
+      
+      const json = await res.json();
+      if (json && json.success) {
+        setTestSuccess(true);
+        setTestResult(`Success! Connected to Epyllion GAS REST API v${json.version || '1.0.0'}. All sheets verified.`);
+      } else {
+        setTestSuccess(false);
+        setTestResult(json.message || "Failed health check. Apps Script returned error response.");
+      }
+    } catch (err: any) {
+      console.error("Connection test failed:", err);
+      setTestSuccess(false);
+      setTestResult(`Connection Failed: ${err.message || 'Network Error'}. Ensure you've deployed the Apps Script as a Web App, configured access to "Anyone", and enabled CORS.`);
+    } finally {
+      setIsTesting(false);
+    }
+  };
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     
+    // Save database mode & URL configurations
+    GasClient.setDatabaseMode(databaseMode);
+    GasClient.setWebAppUrl(gasWebAppUrl);
+
     // Save standard thresholds & fallback standard target
     localStorage.setItem('setting_targetWeight', targetEFL);
     localStorage.setItem('setting_rejectThreshold', rejectThreshold);
@@ -219,6 +270,109 @@ export default function SettingsView() {
             </div>
 
 
+
+            <h3 className="font-sans text-sm font-black text-gray-900 uppercase border-b border-gray-50 pt-4 pb-2 flex items-center gap-2">
+              <Database className="h-4.5 w-4.5 text-blue-600" />
+              Google Sheets & Apps Script Integration
+            </h3>
+
+            <div className="space-y-4 bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200/50 dark:border-slate-800">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Database Connection Mode</label>
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setDatabaseMode('mock')}
+                    className={`px-3 py-2 text-xs font-bold rounded-lg border flex items-center justify-center gap-2 transition-all ${
+                      databaseMode === 'mock'
+                        ? 'border-blue-500 bg-blue-50 text-blue-700 font-extrabold dark:bg-slate-800 dark:text-blue-300'
+                        : 'border-slate-200 bg-white text-slate-600 dark:bg-slate-900 dark:border-slate-800'
+                    }`}
+                  >
+                    <Database className="h-4 w-4" />
+                    <span>Local Mock DB (Demo)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDatabaseMode('gas')}
+                    className={`px-3 py-2 text-xs font-bold rounded-lg border flex items-center justify-center gap-2 transition-all ${
+                      databaseMode === 'gas'
+                        ? 'border-blue-500 bg-blue-50 text-blue-700 font-extrabold dark:bg-slate-800 dark:text-blue-300'
+                        : 'border-slate-200 bg-white text-slate-600 dark:bg-slate-900 dark:border-slate-800'
+                    }`}
+                  >
+                    <Wifi className="h-4 w-4" />
+                    <span>GAS Rest API (Live)</span>
+                  </button>
+                </div>
+                <p className="text-[9px] text-slate-400 font-semibold uppercase tracking-wider mt-1">
+                  {databaseMode === 'mock' 
+                    ? 'Runs offline using fast client-side LocalStorage cache. Perfect for mock testing.' 
+                    : 'Syncs data in real-time with Google Sheets database tables using Google Apps Script.'
+                  }
+                </p>
+              </div>
+
+              {databaseMode === 'gas' && (
+                <div className="space-y-3 animate-fade-in pt-1">
+                  <div className="space-y-1">
+                    <div className="flex justify-between">
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Google Apps Script Web App URL</label>
+                      <a 
+                        href="https://script.google.com" 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="text-[9px] font-bold text-blue-600 hover:underline uppercase tracking-wider"
+                      >
+                        Create Script
+                      </a>
+                    </div>
+                    <input
+                      type="url"
+                      placeholder="https://script.google.com/macros/s/.../exec"
+                      value={gasWebAppUrl}
+                      onChange={(e) => {
+                        setGasWebAppUrl(e.target.value);
+                        setTestSuccess(null);
+                        setTestResult(null);
+                      }}
+                      className="w-full rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-mono font-semibold text-slate-800 dark:text-slate-100 outline-none focus:border-blue-500 focus:bg-white"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={isTesting || !gasWebAppUrl.trim()}
+                      onClick={handleTestConnection}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 py-2 px-3 text-xs font-bold text-slate-800 dark:text-slate-200 transition-all disabled:opacity-50"
+                    >
+                      {isTesting ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <span>Testing Connection...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Wifi className="h-3.5 w-3.5" />
+                          <span>Test Endpoint Connection</span>
+                        </>
+                      )}
+                    </button>
+
+                    {testResult && (
+                      <div className={`p-3 rounded-lg border text-xs font-semibold ${
+                        testSuccess 
+                          ? 'bg-emerald-50 border-emerald-100 text-emerald-800 dark:bg-emerald-950/20 dark:border-emerald-900/50 dark:text-emerald-400' 
+                          : 'bg-red-50 border-red-100 text-red-800 dark:bg-red-950/20 dark:border-red-900/50 dark:text-red-400'
+                      }`}>
+                        {testResult}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
 
             <button
               type="submit"
