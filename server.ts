@@ -97,7 +97,26 @@ function loadDb() {
 
 function saveDb(partial: any) {
   const current = loadDb();
-  const updated = { ...current, ...partial };
+  let updated = { ...current, ...partial };
+
+  // Smart upsert for users array if provided
+  if (partial.users && Array.isArray(partial.users) && current.users && Array.isArray(current.users)) {
+    const newUsers = [...current.users];
+    for (const u of partial.users) {
+      if (!u || !u.uid) continue;
+      const idx = newUsers.findIndex(existing => 
+        (existing.uid && u.uid && existing.uid.toString().trim().toUpperCase() === u.uid.toString().trim().toUpperCase()) ||
+        (existing.id && u.id && existing.id === u.id)
+      );
+      if (idx >= 0) {
+        newUsers[idx] = { ...newUsers[idx], ...u };
+      } else {
+        newUsers.unshift(u);
+      }
+    }
+    updated.users = newUsers;
+  }
+
   try {
     fs.writeFileSync(DB_FILE, JSON.stringify(updated, null, 2), 'utf-8');
   } catch (e) {

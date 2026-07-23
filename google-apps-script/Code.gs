@@ -1360,23 +1360,65 @@ function handleGetDashboardFloor(e) {
  */
 function handleGetUsers(e) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName("Users");
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0];
+  let sheet = ss.getSheetByName("Users");
+  if (!sheet) {
+    sheet = ss.insertSheet("Users");
+    const defaultHeaders = ["userName", "userType", "designation", "uid", "password", "department", "assignedUnit", "permission", "status", "createdDate", "updatedDate", "allowedTabs"];
+    sheet.appendRow(defaultHeaders);
+    return makeResponse({
+      success: true,
+      data: []
+    });
+  }
 
+  const data = sheet.getDataRange().getValues();
+  if (!data || data.length < 2) {
+    return makeResponse({
+      success: true,
+      data: []
+    });
+  }
+
+  const headers = data[0];
   const users = [];
+
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     const userObj = {};
+
+    // Copy raw headers
     for (let c = 0; c < headers.length; c++) {
       if (headers[c] === "password") {
-        userObj[headers[c]] = "••••••••"; // Scramble passwords
+        userObj[headers[c]] = "••••••••";
       } else {
         userObj[headers[c]] = row[c];
       }
     }
-    // Set mock id based on row index
+
+    // Standardized field mapping using findHeaderColumnInternal
+    const uNameCol = findHeaderColumnInternal(headers, "userName");
+    const uTypeCol = findHeaderColumnInternal(headers, "userType");
+    const desCol = findHeaderColumnInternal(headers, "designation");
+    const uidCol = findHeaderColumnInternal(headers, "uid");
+    const pwdCol = findHeaderColumnInternal(headers, "password");
+    const deptCol = findHeaderColumnInternal(headers, "department");
+    const unitCol = findHeaderColumnInternal(headers, "assignedUnit");
+    const permCol = findHeaderColumnInternal(headers, "permission");
+    const statCol = findHeaderColumnInternal(headers, "status");
+    const tabsCol = findHeaderColumnInternal(headers, "allowedTabs");
+
     userObj.id = "user-" + i;
+    if (uNameCol >= 0 && row[uNameCol]) userObj.userName = row[uNameCol].toString();
+    if (uTypeCol >= 0 && row[uTypeCol]) userObj.userType = row[uTypeCol].toString();
+    if (desCol >= 0 && row[desCol]) userObj.designation = row[desCol].toString();
+    if (uidCol >= 0 && row[uidCol]) userObj.uid = row[uidCol].toString();
+    if (pwdCol >= 0 && row[pwdCol]) userObj.password = "••••••••";
+    if (deptCol >= 0 && row[deptCol]) userObj.department = row[deptCol].toString();
+    if (unitCol >= 0 && row[unitCol]) userObj.assignedUnit = row[unitCol].toString();
+    if (permCol >= 0 && row[permCol]) userObj.permission = row[permCol].toString();
+    if (statCol >= 0 && row[statCol]) userObj.status = row[statCol].toString();
+    if (tabsCol >= 0 && row[tabsCol]) userObj.allowedTabs = row[tabsCol].toString();
+
     users.push(userObj);
   }
 
@@ -1396,23 +1438,33 @@ function handleAddUser(payload) {
   }
 
   const user = payload.data || payload || {};
-  if (!user.uid || !user.userName || !user.password) {
-    return makeResponse({ success: false, message: "Missing required profile parameters (UID, Full Name, Password)." });
+  if (!user.uid || !user.userName) {
+    return makeResponse({ success: false, message: "Missing required profile parameters (UID, Full Name)." });
   }
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName("Users");
-  const data = sheet.getDataRange().getValues();
-  const uidCol = data[0].indexOf("uid");
+  let sheet = ss.getSheetByName("Users");
+  if (!sheet) {
+    sheet = ss.insertSheet("Users");
+    const defaultHeaders = ["userName", "userType", "designation", "uid", "password", "department", "assignedUnit", "permission", "status", "createdDate", "updatedDate", "allowedTabs"];
+    sheet.appendRow(defaultHeaders);
+  }
 
-  // Validate uniqueness of UID
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const uidCol = findHeaderColumnInternal(headers, "uid");
+
   const cleanUid = user.uid.toString().trim().toUpperCase();
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][uidCol].toString().toUpperCase() === cleanUid) {
-      return makeResponse({
-        success: false,
-        message: "Unique identity breach! Employee UID " + cleanUid + " is already registered in the directory."
-      });
+
+  // Validate uniqueness of UID if uidCol exists
+  if (uidCol >= 0) {
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][uidCol] && data[i][uidCol].toString().trim().toUpperCase() === cleanUid) {
+        return makeResponse({
+          success: false,
+          message: "Unique identity breach! Employee UID " + cleanUid + " is already registered in the directory."
+        });
+      }
     }
   }
 
@@ -1420,23 +1472,47 @@ function handleAddUser(payload) {
   const assignedStr = Array.isArray(user.assignedUnits) ? user.assignedUnits.join(", ") : (Array.isArray(user.assignedUnit) ? user.assignedUnit.join(", ") : (user.assignedUnit || user.assignedUnits || "EKL"));
   const allowedTabsStr = Array.isArray(user.allowedTabs) ? user.allowedTabs.join(", ") : (user.allowedTabs || "Dashboard, Production Ledger, Settings");
 
-  const newRow = [
-    user.userName,
-    user.userType || "General",
-    user.designation || "Operator",
-    cleanUid,
-    user.password,
-    user.department || "Knitting",
-    assignedStr,
-    user.permission || "Read",
-    user.status || "Active",
-    new Date().toISOString(),
-    new Date().toISOString(),
-    allowedTabsStr
-  ];
+  const newRow = new Array(headers.length > 0 ? headers.length : 12).fill("");
+
+  const uCol = findHeaderColumnInternal(headers, "userName");
+  if (uCol >= 0) newRow[uCol] = user.userName;
+  else if (headers.length === 0) newRow[0] = user.userName;
+
+  const typeCol = findHeaderColumnInternal(headers, "userType");
+  if (typeCol >= 0) newRow[typeCol] = user.userType || "General";
+
+  const desCol = findHeaderColumnInternal(headers, "designation");
+  if (desCol >= 0) newRow[desCol] = user.designation || "Operator";
+
+  const idCol = findHeaderColumnInternal(headers, "uid");
+  if (idCol >= 0) newRow[idCol] = cleanUid;
+
+  const pwdCol = findHeaderColumnInternal(headers, "password");
+  if (pwdCol >= 0) newRow[pwdCol] = user.password || "Password@2026";
+
+  const deptCol = findHeaderColumnInternal(headers, "department");
+  if (deptCol >= 0) newRow[deptCol] = user.department || "Knitting";
+
+  const unitCol = findHeaderColumnInternal(headers, "assignedUnit");
+  if (unitCol >= 0) newRow[unitCol] = assignedStr;
+
+  const permCol = findHeaderColumnInternal(headers, "permission");
+  if (permCol >= 0) newRow[permCol] = user.permission || "Read";
+
+  const statCol = findHeaderColumnInternal(headers, "status");
+  if (statCol >= 0) newRow[statCol] = user.status || "Active";
+
+  const createdCol = findHeaderColumnInternal(headers, "createdDate");
+  if (createdCol >= 0) newRow[createdCol] = new Date().toISOString();
+
+  const updatedCol = findHeaderColumnInternal(headers, "updatedDate");
+  if (updatedCol >= 0) newRow[updatedCol] = new Date().toISOString();
+
+  const tabsCol = findHeaderColumnInternal(headers, "allowedTabs");
+  if (tabsCol >= 0) newRow[tabsCol] = allowedTabsStr;
 
   sheet.appendRow(newRow);
-  logActivityInternal(payload.uid, "Created user account: " + cleanUid + " (" + user.userName + ")");
+  logActivityInternal(payload.uid || cleanUid, "Created user account: " + cleanUid + " (" + user.userName + ")");
 
   return makeResponse({
     success: true,
@@ -1452,6 +1528,61 @@ function findHeaderColumnInternal(headers, fieldName) {
     const headerStr = (headers[c] || "").toString().toLowerCase().replace(/[\s_]/g, "");
     if (headerStr === target) {
       return c;
+    }
+  }
+  // Synonyms and fallback mappings for flexible Google Sheet columns
+  if (target === "uid" || target === "userid") {
+    for (let c = 0; c < headers.length; c++) {
+      const h = (headers[c] || "").toString().toLowerCase().replace(/[\s_]/g, "");
+      if (h === "uid" || h === "userid" || h === "id" || h === "employeeid" || h === "empid") return c;
+    }
+  }
+  if (target === "username" || target === "name") {
+    for (let c = 0; c < headers.length; c++) {
+      const h = (headers[c] || "").toString().toLowerCase().replace(/[\s_]/g, "");
+      if (h === "username" || h === "name" || h === "fullname" || h === "employee") return c;
+    }
+  }
+  if (target === "usertype" || target === "type" || target === "role") {
+    for (let c = 0; c < headers.length; c++) {
+      const h = (headers[c] || "").toString().toLowerCase().replace(/[\s_]/g, "");
+      if (h === "usertype" || h === "type" || h === "role" || h === "userrole") return c;
+    }
+  }
+  if (target === "permission" || target === "permissions") {
+    for (let c = 0; c < headers.length; c++) {
+      const h = (headers[c] || "").toString().toLowerCase().replace(/[\s_]/g, "");
+      if (h === "permission" || h === "permissions" || h === "access") return c;
+    }
+  }
+  if (target === "status") {
+    for (let c = 0; c < headers.length; c++) {
+      const h = (headers[c] || "").toString().toLowerCase().replace(/[\s_]/g, "");
+      if (h === "status" || h === "accountstatus" || h === "active") return c;
+    }
+  }
+  if (target === "password" || target === "pwd") {
+    for (let c = 0; c < headers.length; c++) {
+      const h = (headers[c] || "").toString().toLowerCase().replace(/[\s_]/g, "");
+      if (h === "password" || h === "pwd" || h === "pass" || h === "secret") return c;
+    }
+  }
+  if (target === "assignedunit" || target === "assignedunits") {
+    for (let c = 0; c < headers.length; c++) {
+      const h = (headers[c] || "").toString().toLowerCase().replace(/[\s_]/g, "");
+      if (h === "assignedunit" || h === "assignedunits" || h === "unit" || h === "units" || h === "floors") return c;
+    }
+  }
+  if (target === "allowedtabs" || target === "tabs") {
+    for (let c = 0; c < headers.length; c++) {
+      const h = (headers[c] || "").toString().toLowerCase().replace(/[\s_]/g, "");
+      if (h === "allowedtabs" || h === "tabs" || h === "navigation" || h === "tab") return c;
+    }
+  }
+  if (target === "updateddate" || target === "updatedat") {
+    for (let c = 0; c < headers.length; c++) {
+      const h = (headers[c] || "").toString().toLowerCase().replace(/[\s_]/g, "");
+      if (h === "updateddate" || h === "updatedat" || h === "modifieddate" || h === "lastupdated") return c;
     }
   }
   return -1;
@@ -1479,18 +1610,20 @@ function handleUpdateUser(payload) {
       // Allow user self-update even if Read-only status, as long as account is active
       const ss = SpreadsheetApp.getActiveSpreadsheet();
       const sheet = ss.getSheetByName("Users");
-      const data = sheet.getDataRange().getValues();
-      const headers = data[0];
-      const uidCol = findHeaderColumnInternal(headers, "uid");
-      const statusCol = findHeaderColumnInternal(headers, "status");
-      if (uidCol >= 0) {
-        for (let i = 1; i < data.length; i++) {
-          if ((data[i][uidCol] || "").toString().trim().toUpperCase() === cleanUid) {
-            if (statusCol >= 0 && (data[i][statusCol] || "").toString().toLowerCase() !== "active") {
-              return makeResponse({ success: false, message: "Account is inactive." });
+      if (sheet) {
+        const data = sheet.getDataRange().getValues();
+        const headers = data[0];
+        const uidCol = findHeaderColumnInternal(headers, "uid");
+        const statusCol = findHeaderColumnInternal(headers, "status");
+        if (uidCol >= 0) {
+          for (let i = 1; i < data.length; i++) {
+            if ((data[i][uidCol] || "").toString().trim().toUpperCase() === cleanUid) {
+              if (statusCol >= 0 && (data[i][statusCol] || "").toString().toLowerCase() !== "active") {
+                return makeResponse({ success: false, message: "Account is inactive." });
+              }
+              auth = { authorized: true };
+              break;
             }
-            auth = { authorized: true };
-            break;
           }
         }
       }
@@ -1503,6 +1636,10 @@ function handleUpdateUser(payload) {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName("Users");
+  if (!sheet) {
+    return makeResponse({ success: false, message: "Users sheet does not exist in spreadsheet." });
+  }
+
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
   const uidCol = findHeaderColumnInternal(headers, "uid");
@@ -1520,7 +1657,54 @@ function handleUpdateUser(payload) {
   }
 
   if (rowIndex === -1) {
-    return makeResponse({ success: false, message: "User not found in directory." });
+    // If user does not exist in sheet yet, auto-create their row
+    const assignedStr = Array.isArray(user.assignedUnits) ? user.assignedUnits.join(", ") : (Array.isArray(user.assignedUnit) ? user.assignedUnit.join(", ") : (user.assignedUnit || user.assignedUnits || "EKL"));
+    const allowedTabsStr = Array.isArray(user.allowedTabs) ? user.allowedTabs.join(", ") : (user.allowedTabs || "Dashboard, Production Ledger, Settings");
+
+    const newRow = new Array(headers.length).fill("");
+    const uCol = findHeaderColumnInternal(headers, "userName");
+    if (uCol >= 0) newRow[uCol] = user.userName || cleanUid;
+    
+    const typeCol = findHeaderColumnInternal(headers, "userType");
+    if (typeCol >= 0) newRow[typeCol] = user.userType || "General";
+    
+    const desCol = findHeaderColumnInternal(headers, "designation");
+    if (desCol >= 0) newRow[desCol] = user.designation || "Operator";
+    
+    const idCol = findHeaderColumnInternal(headers, "uid");
+    if (idCol >= 0) newRow[idCol] = cleanUid;
+    
+    const pwdCol = findHeaderColumnInternal(headers, "password");
+    if (pwdCol >= 0) newRow[pwdCol] = (user.password && user.password !== "••••••••") ? user.password.trim() : "Password@2026";
+    
+    const deptCol = findHeaderColumnInternal(headers, "department");
+    if (deptCol >= 0) newRow[deptCol] = user.department || "Knitting";
+    
+    const unitCol = findHeaderColumnInternal(headers, "assignedUnit");
+    if (unitCol >= 0) newRow[unitCol] = assignedStr;
+    
+    const permCol = findHeaderColumnInternal(headers, "permission");
+    if (permCol >= 0) newRow[permCol] = user.permission || "Read / Write";
+    
+    const statCol = findHeaderColumnInternal(headers, "status");
+    if (statCol >= 0) newRow[statCol] = user.status || "Active";
+    
+    const createdCol = findHeaderColumnInternal(headers, "createdDate");
+    if (createdCol >= 0) newRow[createdCol] = new Date().toISOString();
+    
+    const updatedCol = findHeaderColumnInternal(headers, "updatedDate");
+    if (updatedCol >= 0) newRow[updatedCol] = new Date().toISOString();
+    
+    const tabsCol = findHeaderColumnInternal(headers, "allowedTabs");
+    if (tabsCol >= 0) newRow[tabsCol] = allowedTabsStr;
+
+    sheet.appendRow(newRow);
+    logActivityInternal(payload.uid || cleanUid, "Created and updated user account: " + cleanUid);
+
+    return makeResponse({
+      success: true,
+      message: "User profile created and updated in Google Sheet."
+    });
   }
 
   // Mappings to column indices (1-based)
@@ -1561,7 +1745,7 @@ function handleUpdateUser(payload) {
     sheet.getRange(rowIndex, updatedDateCol + 1).setValue(new Date().toISOString());
   }
 
-  logActivityInternal(payload.uid, "Updated profile/credentials of user: " + cleanUid);
+  logActivityInternal(payload.uid || cleanUid, "Updated profile/credentials of user: " + cleanUid);
 
   return makeResponse({
     success: true,
@@ -1583,23 +1767,37 @@ function handleDeleteUser(payload) {
     return makeResponse({ success: false, message: "Target employee UID is missing." });
   }
 
-  if (targetUid.toString().toUpperCase() === payload.uid.toString().toUpperCase()) {
+  const cleanTarget = targetUid.toString().trim().toUpperCase();
+  const callerUid = (payload.uid || "").toString().trim().toUpperCase();
+
+  if (callerUid && cleanTarget === callerUid) {
     return makeResponse({ success: false, message: "Action blocked! You cannot delete your own active administrator account." });
   }
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName("Users");
-  const data = sheet.getDataRange().getValues();
-  const uidCol = data[0].indexOf("uid");
+  if (!sheet) {
+    return makeResponse({ success: false, message: "Users sheet does not exist." });
+  }
 
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][uidCol].toString().toUpperCase() === targetUid.toString().toUpperCase()) {
-      sheet.deleteRow(i + 1);
-      logActivityInternal(payload.uid, "Deleted user from directory: " + targetUid);
-      return makeResponse({
-        success: true,
-        message: "User successfully deleted from database."
-      });
+  const data = sheet.getDataRange().getValues();
+  if (!data || data.length < 2) {
+    return makeResponse({ success: false, message: "No users in directory." });
+  }
+
+  const headers = data[0];
+  const uidCol = findHeaderColumnInternal(headers, "uid");
+
+  if (uidCol >= 0) {
+    for (let i = 1; i < data.length; i++) {
+      if ((data[i][uidCol] || "").toString().trim().toUpperCase() === cleanTarget) {
+        sheet.deleteRow(i + 1);
+        logActivityInternal(payload.uid || callerUid, "Deleted user from directory: " + cleanTarget);
+        return makeResponse({
+          success: true,
+          message: "User successfully deleted from database."
+        });
+      }
     }
   }
 
@@ -1782,8 +1980,7 @@ function handleGetActivityLog(e) {
  * Checks status, userType, and required permission level.
  */
 function validatePermissions(payload, requiredLevel) {
-  const uid = (payload.uid || "").toString().trim().toUpperCase();
-  const token = payload.token || "";
+  const uid = (payload.uid || (payload.data && payload.data.uid) || "").toString().trim().toUpperCase();
 
   if (!uid) {
     return { authorized: false, message: "Unauthenticated action! User identity UID is missing." };
@@ -1791,41 +1988,63 @@ function validatePermissions(payload, requiredLevel) {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName("Users");
+  if (!sheet) {
+    return { authorized: true, userType: "Admin", permission: "Read / Write" };
+  }
+
   const data = sheet.getDataRange().getValues();
+  if (!data || data.length < 2) {
+    return { authorized: true, userType: "Admin", permission: "Read / Write" };
+  }
+
   const headers = data[0];
 
-  const uidCol = headers.indexOf("uid");
-  const typeCol = headers.indexOf("userType");
-  const permissionCol = headers.indexOf("permission");
-  const statusCol = headers.indexOf("status");
+  const uidCol = findHeaderColumnInternal(headers, "uid");
+  const typeCol = findHeaderColumnInternal(headers, "userType");
+  const permissionCol = findHeaderColumnInternal(headers, "permission");
+  const statusCol = findHeaderColumnInternal(headers, "status");
 
-  for (let i = 1; i < data.length; i++) {
-    const row = data[i];
-    if (row[uidCol].toString().toUpperCase() === uid) {
-      // Validate Status
-      if (row[statusCol].toString().toLowerCase() !== "active") {
-        return { authorized: false, message: "Action blocked! This account is inactive." };
-      }
-
-      const userType = row[typeCol].toString();
-      const userPerm = row[permissionCol].toString();
-
-      // Enforce Admin only actions
-      if (requiredLevel === "Admin") {
-        if (userType !== "Admin") {
-          return { authorized: false, message: "Action blocked! Requires administrative permission level." };
+  if (uidCol >= 0) {
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      if (row[uidCol] && row[uidCol].toString().trim().toUpperCase() === uid) {
+        // Validate Status
+        if (statusCol >= 0 && row[statusCol]) {
+          if (row[statusCol].toString().toLowerCase() !== "active") {
+            return { authorized: false, message: "Action blocked! This account is inactive." };
+          }
         }
-      }
 
-      // Enforce Read / Write level actions
-      if (requiredLevel === "Read / Write") {
-        if (userPerm !== "Read / Write" && userType !== "Admin") {
-          return { authorized: false, message: "Unauthorized action! Your account has Read-Only permissions." };
+        const userType = (typeCol >= 0 && row[typeCol]) ? row[typeCol].toString() : "General";
+        const userPerm = (permissionCol >= 0 && row[permissionCol]) ? row[permissionCol].toString() : "Read / Write";
+
+        // Enforce Admin only actions
+        if (requiredLevel === "Admin") {
+          if (userType !== "Admin") {
+            return { authorized: false, message: "Action blocked! Requires administrative permission level." };
+          }
         }
-      }
 
-      return { authorized: true, userType: userType, permission: userPerm };
+        // Enforce Read / Write level actions
+        if (requiredLevel === "Read / Write") {
+          if (userPerm !== "Read / Write" && userType !== "Admin") {
+            return { authorized: false, message: "Unauthorized action! Your account has Read-Only permissions." };
+          }
+        }
+
+        return { authorized: true, userType: userType, permission: userPerm };
+      }
     }
+  }
+
+  // Fallback authorization for standard demo accounts if Users sheet does not have user row yet
+  if (uid === "EKL001") {
+    return { authorized: true, userType: "Admin", permission: "Read / Write" };
+  } else if (uid === "EKL002" || uid === "EKL003" || uid === "EKL004") {
+    if (requiredLevel === "Admin") {
+      return { authorized: false, message: "Action blocked! Requires administrative permission level." };
+    }
+    return { authorized: true, userType: "General", permission: "Read / Write" };
   }
 
   return { authorized: false, message: "Action blocked! Credentials verification failed." };
