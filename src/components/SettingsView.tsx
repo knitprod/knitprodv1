@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { Settings, Save, AlertTriangle, Image, Mail, Cpu, Sparkles, CheckCircle, Database, Wifi, Loader2 } from 'lucide-react';
+import { Settings, Save, AlertTriangle, Image, Mail, Cpu, Sparkles, CheckCircle, Database, Wifi, Loader2, HelpCircle, ExternalLink, Copy } from 'lucide-react';
 import { GasClient } from '../lib/gasClient';
 
 export default function SettingsView() {
@@ -405,12 +405,42 @@ export default function SettingsView() {
                     </button>
 
                     {testResult && (
-                      <div className={`p-3 rounded-lg border text-xs font-semibold ${
-                        testSuccess 
-                          ? 'bg-emerald-50 border-emerald-100 text-emerald-800 dark:bg-emerald-950/20 dark:border-emerald-900/50 dark:text-emerald-400' 
-                          : 'bg-red-50 border-red-100 text-red-800 dark:bg-red-950/20 dark:border-red-900/50 dark:text-red-400'
-                      }`}>
-                        {testResult}
+                      <div className="space-y-3">
+                        <div className={`p-3 rounded-lg border text-xs font-semibold ${
+                          testSuccess 
+                            ? 'bg-emerald-50 border-emerald-100 text-emerald-800 dark:bg-emerald-950/20 dark:border-emerald-900/50 dark:text-emerald-400' 
+                            : 'bg-red-50 border-red-100 text-red-800 dark:bg-red-950/20 dark:border-red-900/50 dark:text-red-400'
+                        }`}>
+                          {testResult}
+                        </div>
+
+                        {testSuccess === false && (
+                          <div className="p-3.5 rounded-xl bg-amber-50/80 border border-amber-200 text-amber-900 text-xs space-y-2.5 dark:bg-amber-950/30 dark:border-amber-900/50 dark:text-amber-300">
+                            <div className="flex items-center gap-1.5 font-bold text-amber-900 dark:text-amber-200 uppercase tracking-wider text-[10px]">
+                              <HelpCircle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                              <span>How to Fix "HTTP Status 404 Not Found"</span>
+                            </div>
+
+                            <p className="text-[11px] font-medium leading-relaxed text-amber-800 dark:text-amber-300">
+                              A <strong>404 Not Found</strong> means Google Apps Script cannot find an active Web App deployment at this URL. This happens if you use a <code className="bg-amber-100 dark:bg-amber-900/50 px-1 py-0.5 rounded font-mono">/dev</code> test link or haven't published a <strong>New Deployment</strong>.
+                            </p>
+
+                            <div className="space-y-1.5 text-[11px] font-medium pt-1">
+                              <div className="font-bold uppercase tracking-wider text-[10px] text-amber-900 dark:text-amber-200">Follow these 4 steps in Google Apps Script:</div>
+                              <ol className="list-decimal pl-4 space-y-1 text-amber-800 dark:text-amber-300 leading-normal">
+                                <li>Open your script at <a href="https://script.google.com" target="_blank" rel="noreferrer" className="underline font-bold text-blue-700 dark:text-blue-400 inline-flex items-center gap-0.5">script.google.com <ExternalLink className="h-3 w-3" /></a></li>
+                                <li>Click the blue <strong>Deploy</strong> button (top-right corner) &rarr; Select <strong>New deployment</strong>.</li>
+                                <li>Select type <strong>Web app</strong>:
+                                  <ul className="list-disc pl-4 mt-0.5 text-[10px] space-y-0.5">
+                                    <li>Execute as: <strong>Me (your email)</strong></li>
+                                    <li>Who has access: <strong>Anyone</strong></li>
+                                  </ul>
+                                </li>
+                                <li>Click <strong>Deploy</strong>, copy the generated Web App URL (must end with <code className="bg-amber-100 dark:bg-amber-900/50 px-1 rounded font-mono">/exec</code>), and paste it above!</li>
+                              </ol>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
