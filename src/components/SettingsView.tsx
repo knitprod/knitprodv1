@@ -50,7 +50,19 @@ export default function SettingsView() {
   }, []);
 
   const handleTestConnection = async () => {
-    if (!gasWebAppUrl.trim()) {
+    let cleanUrl = gasWebAppUrl.trim();
+    if (cleanUrl.endsWith('/dev')) {
+      cleanUrl = cleanUrl.replace(/\/dev$/, '/exec');
+      setGasWebAppUrl(cleanUrl);
+    } else if (cleanUrl.endsWith('/edit')) {
+      cleanUrl = cleanUrl.replace(/\/edit$/, '/exec');
+      setGasWebAppUrl(cleanUrl);
+    } else if (cleanUrl.includes('/macros/s/') && !cleanUrl.endsWith('/exec')) {
+      cleanUrl = cleanUrl.replace(/\/+$/, '') + '/exec';
+      setGasWebAppUrl(cleanUrl);
+    }
+
+    if (!cleanUrl) {
       setTestSuccess(false);
       setTestResult("Please provide a valid Google Apps Script Web App URL first.");
       return;
@@ -62,21 +74,18 @@ export default function SettingsView() {
 
     try {
       // Route test through server proxy to bypass CORS restrictions on all devices
-      const tempUrl = gasWebAppUrl.trim();
-      const testUrl = `/api/gas-proxy?action=health&url=${encodeURIComponent(tempUrl)}`;
+      const testUrl = `/api/gas-proxy?action=health&url=${encodeURIComponent(cleanUrl)}`;
       
       const res = await fetch(testUrl);
-      if (!res.ok) {
-        throw new Error(`HTTP status: ${res.status}`);
-      }
+      const json = await res.json().catch(() => null);
       
-      const json = await res.json();
-      if (json && json.success) {
+      if (!res.ok || !json || !json.success) {
+        const message = json?.message || `HTTP status: ${res.status}`;
+        setTestSuccess(false);
+        setTestResult(`Connection Failed: ${message}`);
+      } else {
         setTestSuccess(true);
         setTestResult(`Success! Connected to Epyllion GAS REST API v${json.version || '1.0.0'}. All sheets verified.`);
-      } else {
-        setTestSuccess(false);
-        setTestResult(json.message || "Failed health check. Apps Script returned error response.");
       }
     } catch (err: any) {
       console.error("Connection test failed:", err);

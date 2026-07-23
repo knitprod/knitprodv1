@@ -154,7 +154,16 @@ app.all('/api/gas-proxy', async (req, res) => {
       });
     }
 
-    const trimmedUrl = targetUrl.trim();
+    let trimmedUrl = targetUrl.trim();
+
+    // Auto-correct common Google Apps Script URL mistakes
+    if (trimmedUrl.endsWith('/dev')) {
+      trimmedUrl = trimmedUrl.replace(/\/dev$/, '/exec');
+    } else if (trimmedUrl.endsWith('/edit')) {
+      trimmedUrl = trimmedUrl.replace(/\/edit$/, '/exec');
+    } else if (trimmedUrl.includes('/macros/s/') && !trimmedUrl.endsWith('/exec')) {
+      trimmedUrl = trimmedUrl.replace(/\/+$/, '') + '/exec';
+    }
 
     if (req.method === 'GET') {
       const urlObj = new URL(trimmedUrl);
@@ -171,9 +180,15 @@ app.all('/api/gas-proxy', async (req, res) => {
       });
 
       if (!response.ok) {
+        let hint = '';
+        if (response.status === 404) {
+          hint = ' (404 Not Found: Ensure URL ends in "/exec", not "/dev", and that a Web App deployment exists in Google Apps Script).';
+        } else if (response.status === 401 || response.status === 403) {
+          hint = ' (Access Denied: Set "Who has access" to "Anyone" in Google Apps Script deployment).';
+        }
         return res.status(response.status).json({
           success: false,
-          message: `Google Apps Script returned HTTP status ${response.status}`
+          message: `Google Apps Script returned HTTP status ${response.status}${hint}`
         });
       }
 
@@ -199,9 +214,15 @@ app.all('/api/gas-proxy', async (req, res) => {
       });
 
       if (!response.ok) {
+        let hint = '';
+        if (response.status === 404) {
+          hint = ' (404 Not Found: Ensure URL ends in "/exec", not "/dev", and that a Web App deployment exists in Google Apps Script).';
+        } else if (response.status === 401 || response.status === 403) {
+          hint = ' (Access Denied: Set "Who has access" to "Anyone" in Google Apps Script deployment).';
+        }
         return res.status(response.status).json({
           success: false,
-          message: `Google Apps Script returned HTTP status ${response.status}`
+          message: `Google Apps Script returned HTTP status ${response.status}${hint}`
         });
       }
 
