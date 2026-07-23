@@ -128,6 +128,56 @@ export class GasClient {
   }
 
   /**
+   * Tests connection to Google Apps Script REST API using both proxy and direct browser fetch fallbacks.
+   */
+  static async testConnection(url: string): Promise<{ success: boolean; message: string; version?: string }> {
+    let cleanUrl = url.trim();
+    if (cleanUrl.endsWith('/dev')) {
+      cleanUrl = cleanUrl.replace(/\/dev$/, '/exec');
+    } else if (cleanUrl.endsWith('/edit')) {
+      cleanUrl = cleanUrl.replace(/\/edit$/, '/exec');
+    } else if (cleanUrl.includes('/macros/s/') && !cleanUrl.endsWith('/exec')) {
+      cleanUrl = cleanUrl.replace(/\/+$/, '') + '/exec';
+    }
+
+    // 1. Try server proxy first
+    try {
+      const proxyUrl = `/api/gas-proxy?action=health&url=${encodeURIComponent(cleanUrl)}`;
+      const res = await fetch(proxyUrl);
+      const ct = res.headers.get('content-type') || '';
+      if (res.ok && ct.includes('application/json')) {
+        const json = await res.json();
+        if (json && json.success) {
+          return { success: true, message: json.message || 'Connected successfully', version: json.version };
+        }
+      }
+    } catch (e) {
+      // Proxy failed or unavailable, fallback to direct
+    }
+
+    // 2. Direct browser fetch fallback (works on static hosting like Vercel/Netlify)
+    try {
+      const separator = cleanUrl.includes('?') ? '&' : '?';
+      const directUrl = `${cleanUrl}${separator}action=health`;
+      const res = await fetch(directUrl);
+      if (!res.ok) {
+        return { success: false, message: `HTTP status ${res.status}. Ensure URL ends in /exec and Web App is deployed.` };
+      }
+      const json = await res.json();
+      if (json && json.success) {
+        return { success: true, message: json.message || 'Connected successfully', version: json.version };
+      } else {
+        return { success: false, message: json?.message || 'Apps Script returned error response.' };
+      }
+    } catch (err: any) {
+      return {
+        success: false,
+        message: `Connection test failed: ${err.message || 'Network error'}. Ensure Web App access is set to "Anyone".`
+      };
+    }
+  }
+
+  /**
    * Performs an API request to the Google Apps Script endpoint via the server proxy.
    * If proxy is unavailable (e.g., on static Vercel hosting), falls back to direct fetch.
    */
@@ -159,7 +209,8 @@ export class GasClient {
         }
 
         const response = await fetch(`/api/gas-proxy?${queryParams.toString()}`);
-        if (response.ok) {
+        const ct = response.headers.get('content-type') || '';
+        if (response.ok && ct.includes('application/json')) {
           const json = await response.json();
           if (json && (json.success !== undefined || json.data !== undefined)) {
             return json;
@@ -178,7 +229,8 @@ export class GasClient {
           })
         });
 
-        if (response.ok) {
+        const ct = response.headers.get('content-type') || '';
+        if (response.ok && ct.includes('application/json')) {
           const json = await response.json();
           if (json && (json.success !== undefined || json.data !== undefined)) {
             return json;

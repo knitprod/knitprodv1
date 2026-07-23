@@ -73,19 +73,13 @@ export default function SettingsView() {
     setTestSuccess(null);
 
     try {
-      // Route test through server proxy to bypass CORS restrictions on all devices
-      const testUrl = `/api/gas-proxy?action=health&url=${encodeURIComponent(cleanUrl)}`;
-      
-      const res = await fetch(testUrl);
-      const json = await res.json().catch(() => null);
-      
-      if (!res.ok || !json || !json.success) {
-        const message = json?.message || `HTTP status: ${res.status}`;
-        setTestSuccess(false);
-        setTestResult(`Connection Failed: ${message}`);
-      } else {
+      const res = await GasClient.testConnection(cleanUrl);
+      if (res.success) {
         setTestSuccess(true);
-        setTestResult(`Success! Connected to Epyllion GAS REST API v${json.version || '1.0.0'}. All sheets verified.`);
+        setTestResult(`Success! Connected to Epyllion GAS REST API v${res.version || '1.0.0'}. All sheets verified.`);
+      } else {
+        setTestSuccess(false);
+        setTestResult(`Connection Failed: ${res.message}`);
       }
     } catch (err: any) {
       console.error("Connection test failed:", err);
