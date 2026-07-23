@@ -12,6 +12,57 @@ import { UserRecord } from '../components/UserManagementView';
  */
 export class GasClient {
   /**
+   * Fetches the central database configuration from the full-stack server
+   * and synchronizes it with local device storage.
+   */
+  static async fetchServerConfig(): Promise<{ gasWebAppUrl: string; databaseMode: 'mock' | 'gas' }> {
+    try {
+      const res = await fetch('/api/config');
+      if (res.ok) {
+        const json = await res.json();
+        if (json && json.success && json.config) {
+          const { gasWebAppUrl, databaseMode } = json.config;
+          const localUrl = localStorage.getItem('setting_gasWebAppUrl') || '';
+          
+          if (gasWebAppUrl && gasWebAppUrl.trim()) {
+            this.setWebAppUrl(gasWebAppUrl.trim());
+            this.setDatabaseMode(databaseMode || 'gas');
+          } else if (localUrl.trim()) {
+            // Push existing local configuration to central server so other devices get connected
+            await this.saveServerConfig(localUrl, (localStorage.getItem('setting_databaseMode') as 'mock' | 'gas') || 'gas');
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Could not fetch server configuration, using local storage fallback:", err);
+    }
+
+    return {
+      gasWebAppUrl: this.getWebAppUrl(),
+      databaseMode: this.getDatabaseMode(),
+    };
+  }
+
+  /**
+   * Persists database settings centrally on the server so all devices stay connected automatically.
+   */
+  static async saveServerConfig(url: string, mode: 'mock' | 'gas'): Promise<void> {
+    const trimmedUrl = url.trim();
+    this.setWebAppUrl(trimmedUrl);
+    this.setDatabaseMode(mode);
+
+    try {
+      await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gasWebAppUrl: trimmedUrl, databaseMode: mode }),
+      });
+    } catch (err) {
+      console.error("Failed to save central server config:", err);
+    }
+  }
+
+  /**
    * Retrieves the current database mode ('mock' or 'gas')
    */
   static getDatabaseMode(): 'mock' | 'gas' {

@@ -290,9 +290,13 @@ export default function App() {
 
   // Synchronize with Google Sheets whenever user navigates or refreshes
   useEffect(() => {
-    if (GasClient.getDatabaseMode() === 'gas') {
-      loadLiveGasData();
-    }
+    const initAndLoad = async () => {
+      await GasClient.fetchServerConfig();
+      if (GasClient.getDatabaseMode() === 'gas' && GasClient.getWebAppUrl()) {
+        loadLiveGasData();
+      }
+    };
+    initAndLoad();
   }, [currentPage]);
 
   // Sync floor targets and machines configuration dynamically when page or settings change

@@ -37,6 +37,18 @@ export default function SettingsView() {
 
   const [isSaved, setIsSaved] = useState(false);
 
+  // Sync with central server configuration when Settings page opens
+  React.useEffect(() => {
+    GasClient.fetchServerConfig().then((config) => {
+      if (config.gasWebAppUrl) {
+        setGasWebAppUrl(config.gasWebAppUrl);
+      }
+      if (config.databaseMode) {
+        setDatabaseMode(config.databaseMode);
+      }
+    });
+  }, []);
+
   const handleTestConnection = async () => {
     if (!gasWebAppUrl.trim()) {
       setTestSuccess(false);
@@ -76,12 +88,11 @@ export default function SettingsView() {
     }
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Save database mode & URL configurations
-    GasClient.setDatabaseMode(databaseMode);
-    GasClient.setWebAppUrl(gasWebAppUrl);
+    // Save database mode & URL configurations centrally on the server so all devices stay connected
+    await GasClient.saveServerConfig(gasWebAppUrl, databaseMode);
 
     // Save standard thresholds & fallback standard target
     localStorage.setItem('setting_targetWeight', targetEFL);

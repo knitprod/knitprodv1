@@ -249,11 +249,15 @@ export default function ProductionLedgerView() {
   };
 
   React.useEffect(() => {
-    const mode = GasClient.getDatabaseMode();
-    if (mode === 'gas') {
-      setIsGasMode(true);
-      loadGasLedger();
-    }
+    const initAndLoad = async () => {
+      await GasClient.fetchServerConfig();
+      const mode = GasClient.getDatabaseMode();
+      if (mode === 'gas' && GasClient.getWebAppUrl()) {
+        setIsGasMode(true);
+        loadGasLedger();
+      }
+    };
+    initAndLoad();
   }, []);
 
   React.useEffect(() => {
