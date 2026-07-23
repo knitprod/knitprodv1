@@ -62,12 +62,14 @@ export class GasClient {
     }
   }
 
+  static DEFAULT_URL = 'https://script.google.com/macros/s/AKfycbzfsNc4kKa3jcyeC646qmVWhaCyvJKWMlGwvcRRJeDLqaTS61bIIteWEYvVb_Gk_Q/exec';
+
   /**
    * Retrieves the current database mode ('mock' or 'gas')
    */
   static getDatabaseMode(): 'mock' | 'gas' {
-    if (typeof window === 'undefined') return 'mock';
-    return (localStorage.getItem('setting_databaseMode') as 'mock' | 'gas') || 'mock';
+    if (typeof window === 'undefined') return 'gas';
+    return (localStorage.getItem('setting_databaseMode') as 'mock' | 'gas') || 'gas';
   }
 
   /**
@@ -81,8 +83,8 @@ export class GasClient {
    * Retrieves the configured Google Apps Script Web App URL
    */
   static getWebAppUrl(): string {
-    if (typeof window === 'undefined') return '';
-    return localStorage.getItem('setting_gasWebAppUrl') || '';
+    if (typeof window === 'undefined') return this.DEFAULT_URL;
+    return localStorage.getItem('setting_gasWebAppUrl') || this.DEFAULT_URL;
   }
 
   /**
@@ -127,10 +129,10 @@ export class GasClient {
 
   /**
    * Performs an API request to the Google Apps Script endpoint via the server proxy.
-   * Eliminates cross-origin CORS limitations across all user devices.
+   * If proxy is unavailable (e.g., on static Vercel hosting), falls back to direct fetch.
    */
   private static async request<T>(action: string, method: 'GET' | 'POST', bodyData?: any): Promise<{ success: boolean; message?: string; data?: T }> {
-    const webAppUrl = this.getWebAppUrl();
+    const webAppUrl = this.getWebAppUrl() || this.DEFAULT_URL;
     const currentUserStr = typeof window !== 'undefined' ? localStorage.getItem('active_knitting_user') : null;
     let uid = 'ANONYMOUS';
     let token = '';
@@ -142,44 +144,86 @@ export class GasClient {
       } catch(e) {}
     }
 
-    if (method === 'GET') {
-      const queryParams = new URLSearchParams();
-      queryParams.append('action', action);
-      if (webAppUrl) {
+    // Try server proxy first
+    try {
+      if (method === 'GET') {
+        const queryParams = new URLSearchParams();
+        queryParams.append('action', action);
         queryParams.append('url', webAppUrl);
-      }
-      if (bodyData) {
-        Object.entries(bodyData).forEach(([k, v]) => {
-          if (v !== undefined && v !== null) {
-            queryParams.append(k, String(v));
+        if (bodyData) {
+          Object.entries(bodyData).forEach(([k, v]) => {
+            if (v !== undefined && v !== null) {
+              queryParams.append(k, String(v));
+            }
+          });
+        }
+
+        const response = await fetch(`/api/gas-proxy?${queryParams.toString()}`);
+        if (response.ok) {
+          const json = await response.json();
+          if (json && (json.success !== undefined || json.data !== undefined)) {
+            return json;
           }
+        }
+      } else {
+        const response = await fetch('/api/gas-proxy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: action,
+            uid: uid,
+            token: token,
+            data: bodyData,
+            url: webAppUrl
+          })
         });
-      }
 
-      const response = await fetch(`/api/gas-proxy?${queryParams.toString()}`);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        if (response.ok) {
+          const json = await response.json();
+          if (json && (json.success !== undefined || json.data !== undefined)) {
+            return json;
+          }
+        }
       }
-      return await response.json();
-    } else {
-      const response = await fetch('/api/gas-proxy', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          action: action,
-          uid: uid,
-          token: token,
-          data: bodyData,
-          url: webAppUrl || undefined
-        })
-      });
+    } catch (proxyError) {
+      console.warn("Proxy call failed, attempting direct fetch fallback to Apps Script:", proxyError);
+    }
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+    // Direct Browser Fetch Fallback (for Vercel or pure client environments)
+    try {
+      if (method === 'GET') {
+        const separator = webAppUrl.includes('?') ? '&' : '?';
+        let directUrl = `${webAppUrl}${separator}action=${encodeURIComponent(action)}`;
+        if (bodyData) {
+          const params = new URLSearchParams();
+          Object.entries(bodyData).forEach(([k, v]) => {
+            if (v !== undefined && v !== null) params.append(k, String(v));
+          });
+          const str = params.toString();
+          if (str) directUrl += `&${str}`;
+        }
+
+        const response = await fetch(directUrl);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return await response.json();
+      } else {
+        const response = await fetch(webAppUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: action,
+            uid: uid,
+            token: token,
+            data: bodyData
+          })
+        });
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return await response.json();
       }
-      return await response.json();
+    } catch (directError: any) {
+      console.error("Direct fetch to Google Apps Script failed:", directError);
+      throw new Error(`Failed to connect to Google Apps Script: ${directError.message || 'Network error'}`);
     }
   }
 
