@@ -4,8 +4,9 @@
  */
 
 import React, { useState } from 'react';
-import { Settings, Save, AlertTriangle, Image, Mail, Cpu, Sparkles, CheckCircle, Database, Wifi, Loader2, HelpCircle, ExternalLink, Copy } from 'lucide-react';
+import { Settings, Save, AlertTriangle, Image, Mail, Cpu, Sparkles, CheckCircle, Database, Wifi, Loader2, HelpCircle, ExternalLink, Copy, Check } from 'lucide-react';
 import { GasClient } from '../lib/gasClient';
+import gasScriptContent from '../../google-apps-script/Code.gs?raw';
 
 export default function SettingsView() {
   const [rejectThreshold, setRejectThreshold] = useState(() => localStorage.getItem('setting_rejectThreshold') || '2.5');
@@ -34,6 +35,17 @@ export default function SettingsView() {
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [testSuccess, setTestSuccess] = useState<boolean | null>(null);
+  const [copiedScript, setCopiedScript] = useState(false);
+
+  const handleCopyScript = async () => {
+    try {
+      await navigator.clipboard.writeText(gasScriptContent);
+      setCopiedScript(true);
+      setTimeout(() => setCopiedScript(false), 2500);
+    } catch (err) {
+      console.error('Failed to copy script:', err);
+    }
+  };
 
   const [isSaved, setIsSaved] = useState(false);
 
@@ -354,16 +366,37 @@ export default function SettingsView() {
               {databaseMode === 'gas' && (
                 <div className="space-y-3 animate-fade-in pt-1">
                   <div className="space-y-1">
-                    <div className="flex justify-between">
+                    <div className="flex items-center justify-between">
                       <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Google Apps Script Web App URL</label>
-                      <a 
-                        href="https://script.google.com" 
-                        target="_blank" 
-                        rel="noreferrer"
-                        className="text-[9px] font-bold text-blue-600 hover:underline uppercase tracking-wider"
-                      >
-                        Create Script
-                      </a>
+                      <div className="flex items-center gap-2">
+                        <button 
+                          type="button"
+                          onClick={handleCopyScript}
+                          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/50 text-[10px] font-bold text-blue-700 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/60 uppercase tracking-wider transition-all cursor-pointer shadow-2xs"
+                        >
+                          {copiedScript ? (
+                            <>
+                              <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400 animate-bounce" />
+                              <span className="text-emerald-600 dark:text-emerald-400 font-extrabold">Copied GAS Script!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="h-3 w-3 text-blue-600 dark:text-blue-400" />
+                              <span>Copy GAS Script</span>
+                            </>
+                          )}
+                        </button>
+                        <span className="text-gray-300 dark:text-slate-700">|</span>
+                        <a 
+                          href="https://script.google.com" 
+                          target="_blank" 
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-0.5 text-[10px] font-bold text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 uppercase tracking-wider transition-colors"
+                        >
+                          <span>Open Apps Script</span>
+                          <ExternalLink className="h-2.5 w-2.5" />
+                        </a>
+                      </div>
                     </div>
                     <input
                       type="url"

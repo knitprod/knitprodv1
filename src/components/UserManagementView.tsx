@@ -196,9 +196,21 @@ export default function UserManagementView() {
     return INITIAL_USERS;
   });
 
-  // Load users from central server DB on mount
+  // Load users from central server DB or Google Apps Script on mount
   useEffect(() => {
     const syncUsersWithServer = async () => {
+      if (GasClient.getDatabaseMode() === 'gas') {
+        try {
+          const serverUsers = await GasClient.fetchUsers();
+          if (serverUsers && Array.isArray(serverUsers) && serverUsers.length > 0) {
+            setUsers(serverUsers);
+            localStorage.setItem('knitting_system_users_ledger', JSON.stringify(serverUsers));
+            return;
+          }
+        } catch (e) {
+          console.warn("Could not fetch users from Google Sheets, falling back to local DB:", e);
+        }
+      }
       const db = await GasClient.fetchServerDb();
       if (db && Array.isArray(db.users) && db.users.length > 0) {
         setUsers(db.users);
@@ -332,19 +344,28 @@ export default function UserManagementView() {
     showToast("Global Search focused. Type to filter records.", "info");
   };
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setIsRefreshing(true);
-    setTimeout(() => {
-      setGlobalSearch('');
-      setFilterUserType('all');
-      setFilterDepartment('all');
-      setFilterAssignedUnit('all');
-      setFilterPermission('all');
-      setFilterStatus('all');
-      setCurrentPage(1);
-      setIsRefreshing(false);
-      showToast("User Management Ledger refreshed successfully.", "success");
-    }, 500);
+    if (GasClient.getDatabaseMode() === 'gas') {
+      try {
+        const serverUsers = await GasClient.fetchUsers();
+        if (serverUsers && Array.isArray(serverUsers)) {
+          setUsers(serverUsers);
+          localStorage.setItem('knitting_system_users_ledger', JSON.stringify(serverUsers));
+        }
+      } catch (err: any) {
+        showToast(`Sync warning: ${err.message || 'Failed to sync with Google Sheets.'}`, 'error');
+      }
+    }
+    setGlobalSearch('');
+    setFilterUserType('all');
+    setFilterDepartment('all');
+    setFilterAssignedUnit('all');
+    setFilterPermission('all');
+    setFilterStatus('all');
+    setCurrentPage(1);
+    setIsRefreshing(false);
+    showToast("User Management Ledger refreshed successfully.", "success");
   };
 
   const togglePasswordVisibility = (userId: string) => {
@@ -354,19 +375,30 @@ export default function UserManagementView() {
     }));
   };
 
-  const handleToggleStatus = (userId: string) => {
-    setUsers(prev => prev.map(u => {
-      if (u.id === userId) {
-        const nextStatus = u.status === 'Active' ? 'Inactive' : 'Active';
-        showToast(`User ${u.userName} status set to ${nextStatus}`, 'info');
-        return {
-          ...u,
-          status: nextStatus,
-          lastUpdated: getFormattedDateTime()
-        };
+  const handleToggleStatus = async (userId: string) => {
+    const targetUser = users.find(u => u.id === userId);
+    if (!targetUser) return;
+    const nextStatus = targetUser.status === 'Active' ? 'Inactive' : 'Active';
+    const updatedUser: UserRecord = {
+      ...targetUser,
+      status: nextStatus as 'Active' | 'Inactive',
+      lastUpdated: getFormattedDateTime()
+    };
+
+    if (GasClient.getDatabaseMode() === 'gas') {
+      try {
+        await GasClient.updateUser(updatedUser);
+        showToast(`Updated ${targetUser.userName} status to ${nextStatus} in Google Sheets`, 'success');
+      } catch (err: any) {
+        showToast(`Failed to update status in Google Sheets: ${err.message}`, 'error');
+        return;
       }
-      return u;
-    }));
+    }
+
+    setUsers(prev => prev.map(u => u.id === userId ? updatedUser : u));
+    if (GasClient.getDatabaseMode() !== 'gas') {
+      showToast(`User ${targetUser.userName} status set to ${nextStatus}`, 'info');
+    }
   };
 
   const handleOpenAddModal = () => {
@@ -431,7 +463,7 @@ export default function UserManagementView() {
     showToast("Form fields cleared", "info");
   };
 
-  const handleSaveUser = (e: React.FormEvent) => {
+  const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
 
@@ -471,30 +503,55 @@ export default function UserManagementView() {
         allowedTabs: [...formAllowedTabs]
       };
 
+      if (GasClient.getDatabaseMode() === 'gas') {
+        try {
+          await GasClient.addUser(newUser);
+          showToast(`Successfully registered user in Google Sheets: ${newUser.userName}`, 'success');
+        } catch (err: any) {
+          setFormError(`Google Sheets Error: ${err.message || 'Failed to save user.'}`);
+          showToast(`Google Sheets Sync Error: ${err.message || 'Failed to save user.'}`, 'error');
+          return;
+        }
+      }
+
       setUsers(prev => [newUser, ...prev]);
-      showToast(`Successfully registered new user: ${newUser.userName}`, 'success');
+      if (GasClient.getDatabaseMode() !== 'gas') {
+        showToast(`Successfully registered new user: ${newUser.userName}`, 'success');
+      }
     } else {
       // Edit mode
-      setUsers(prev => prev.map(u => {
-        if (u.id === editingUserId) {
-          return {
-            ...u,
-            userName: formName.trim(),
-            userType: formType,
-            designation: formDesignation,
-            uid: formUid.trim().toUpperCase(),
-            password: formPassword,
-            department: formDepartment,
-            assignedUnits: [...formAssignedUnits],
-            permission: formPermission,
-            status: formStatus,
-            lastUpdated: timestamp,
-            allowedTabs: [...formAllowedTabs]
-          };
+      const updatedUser: UserRecord = {
+        id: editingUserId || `usr-${Date.now()}`,
+        userName: formName.trim(),
+        userType: formType,
+        designation: formDesignation,
+        uid: formUid.trim().toUpperCase(),
+        password: formPassword,
+        department: formDepartment,
+        assignedUnits: [...formAssignedUnits],
+        permission: formPermission,
+        status: formStatus,
+        lastUpdated: timestamp,
+        allowedTabs: [...formAllowedTabs]
+      };
+
+      if (GasClient.getDatabaseMode() === 'gas') {
+        try {
+          await GasClient.updateUser(updatedUser);
+          showToast(`Successfully updated user in Google Sheets: ${formName.trim()}`, 'success');
+        } catch (err: any) {
+          console.warn("Google Sheets update user error:", err);
+          setUsers(prev => prev.map(u => u.id === editingUserId ? updatedUser : u));
+          showToast(`Google Sheets Sync Warning: ${err.message || 'Failed to sync with Google Sheets.'}. Updated locally.`, 'error');
+          setIsPopupOpen(false);
+          return;
         }
-        return u;
-      }));
-      showToast(`Successfully updated credentials for: ${formName.trim()}`, 'success');
+      }
+
+      setUsers(prev => prev.map(u => u.id === editingUserId ? updatedUser : u));
+      if (GasClient.getDatabaseMode() !== 'gas') {
+        showToast(`Successfully updated credentials for: ${formName.trim()}`, 'success');
+      }
     }
 
     setIsPopupOpen(false);
@@ -504,12 +561,25 @@ export default function UserManagementView() {
     setDeletingUserId(userId);
   };
 
-  const executeDelete = () => {
+  const executeDelete = async () => {
     if (!deletingUserId) return;
     const targetUser = users.find(u => u.id === deletingUserId);
     if (targetUser) {
+      if (GasClient.getDatabaseMode() === 'gas') {
+        try {
+          await GasClient.deleteUser(targetUser.uid);
+          showToast(`Deleted user from Google Sheets: ${targetUser.userName}`, 'success');
+        } catch (err: any) {
+          showToast(`Failed to delete user in Google Sheets: ${err.message}`, 'error');
+          setDeletingUserId(null);
+          return;
+        }
+      }
+
       setUsers(prev => prev.filter(u => u.id !== deletingUserId));
-      showToast(`Permanently deleted user: ${targetUser.userName}`, 'success');
+      if (GasClient.getDatabaseMode() !== 'gas') {
+        showToast(`Permanently deleted user: ${targetUser.userName}`, 'success');
+      }
     }
     setDeletingUserId(null);
   };

@@ -22,10 +22,16 @@ import {
   Users, 
   LogOut,
   Sun,
-  Moon
+  Moon,
+  Key,
+  Lock,
+  Eye,
+  EyeOff,
+  Loader2
 } from 'lucide-react';
 import { ActivityLog } from '../types';
 import { UserRecord } from './UserManagementView';
+import { GasClient } from '../lib/gasClient';
 
 interface HeaderProps {
   notifications: ActivityLog[];
@@ -56,6 +62,75 @@ export default function Header({
   const [date, setDate] = useState<string>('Friday, July 10, 2026');
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPwdText, setShowPwdText] = useState(false);
+  const [isUpdatingPwd, setIsUpdatingPwd] = useState(false);
+  const [pwdError, setPwdError] = useState<string | null>(null);
+  const [pwdSuccess, setPwdSuccess] = useState<string | null>(null);
+
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwdError(null);
+    setPwdSuccess(null);
+
+    if (!newPassword.trim()) {
+      return setPwdError("Please enter a new password.");
+    }
+    if (newPassword.trim().length < 4) {
+      return setPwdError("Password must be at least 4 characters long.");
+    }
+    if (newPassword.trim() !== confirmPassword.trim()) {
+      return setPwdError("Passwords do not match.");
+    }
+
+    if (!currentUser || !currentUser.uid) {
+      return setPwdError("User session missing.");
+    }
+
+    setIsUpdatingPwd(true);
+
+    const updatedUser: UserRecord = {
+      ...currentUser,
+      password: newPassword.trim(),
+      lastUpdated: new Date().toLocaleString()
+    };
+
+    try {
+      if (GasClient.getDatabaseMode() === 'gas') {
+        await GasClient.updateUser(updatedUser);
+      }
+      
+      // Update local storage session
+      localStorage.setItem('active_knitting_user', JSON.stringify(updatedUser));
+      
+      // Also update in user ledger local storage if present
+      const savedLedger = localStorage.getItem('knitting_system_users_ledger');
+      if (savedLedger) {
+        try {
+          const users = JSON.parse(savedLedger) as UserRecord[];
+          const updatedLedger = users.map(u => u.uid.toUpperCase() === currentUser.uid.toUpperCase() ? updatedUser : u);
+          localStorage.setItem('knitting_system_users_ledger', JSON.stringify(updatedLedger));
+        } catch(err) {}
+      }
+
+      setPwdSuccess("Password updated and synced successfully!");
+      setTimeout(() => {
+        setShowPasswordModal(false);
+        setNewPassword('');
+        setConfirmPassword('');
+        setPwdSuccess(null);
+      }, 1500);
+    } catch (err: any) {
+      console.warn("Password sync error:", err);
+      // Fallback update locally so the user session stays updated
+      localStorage.setItem('active_knitting_user', JSON.stringify(updatedUser));
+      setPwdError(`Google Sheets Sync Error: ${err.message || 'Server error'}. Saved locally.`);
+    } finally {
+      setIsUpdatingPwd(false);
+    }
+  };
 
   // Live ticking clock as requested by "Current Time (Live Placeholder)"
   useEffect(() => {
@@ -271,6 +346,23 @@ export default function Header({
                   </span>
                 </div>
                 
+                <div className="pt-1 pb-1 space-y-1">
+                  <button
+                    onClick={() => {
+                      setShowProfileDropdown(false);
+                      setPwdError(null);
+                      setPwdSuccess(null);
+                      setNewPassword('');
+                      setConfirmPassword('');
+                      setShowPasswordModal(true);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <Key className="h-3.5 w-3.5 text-blue-500" />
+                    <span>Change Password</span>
+                  </button>
+                </div>
+
                 <button
                   onClick={() => {
                     setShowProfileDropdown(false);
@@ -286,6 +378,112 @@ export default function Header({
           )}
         </div>
       </div>
+
+      {/* Change Password Modal */}
+      {showPasswordModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-fade-in">
+          <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-6 py-4 bg-slate-50/50 dark:bg-slate-800/30">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400">
+                  <Lock className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">Change Account Password</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Update security credentials for {currentUser?.uid || 'user'}</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowPasswordModal(false)}
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 dark:text-slate-500 transition-colors cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdatePassword} className="p-6 space-y-4">
+              {pwdError && (
+                <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 text-xs text-red-600 dark:text-red-400 flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>{pwdError}</span>
+                </div>
+              )}
+
+              {pwdSuccess && (
+                <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-2">
+                  <Check className="h-4 w-4 shrink-0" />
+                  <span>{pwdSuccess}</span>
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                  <span>New Password</span>
+                  <span className="text-[10px] text-slate-400">Min 4 characters</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPwdText ? "text" : "password"}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Enter new password..."
+                    className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-3.5 py-2.5 text-xs text-slate-900 dark:text-white focus:border-blue-500 focus:bg-white dark:focus:bg-slate-800 focus:outline-hidden transition-all pr-10"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPwdText(!showPwdText)}
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                  >
+                    {showPwdText ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Confirm New Password
+                </label>
+                <input
+                  type={showPwdText ? "text" : "password"}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Re-type new password..."
+                  className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-3.5 py-2.5 text-xs text-slate-900 dark:text-white focus:border-blue-500 focus:bg-white dark:focus:bg-slate-800 focus:outline-hidden transition-all"
+                  required
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowPasswordModal(false)}
+                  className="rounded-xl px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdatingPwd}
+                  className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-5 py-2 text-xs font-bold shadow-md hover:shadow-lg transition-all disabled:opacity-50 cursor-pointer"
+                >
+                  {isUpdatingPwd ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Updating...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Key className="h-4 w-4" />
+                      <span>Update Password</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </header>
   );
 }
