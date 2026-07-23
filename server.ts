@@ -6,6 +6,7 @@ import { createServer as createViteServer } from 'vite';
 const app = express();
 const PORT = 3000;
 const CONFIG_FILE = path.join(process.cwd(), 'app_config.json');
+const DB_FILE = path.join(process.cwd(), 'app_db.json');
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -50,6 +51,61 @@ function saveConfig(newConfig: Partial<{ gasWebAppUrl: string; databaseMode: 'ga
   return updated;
 }
 
+// Central database helpers
+function loadDb() {
+  let db: any = {
+    settings: {
+      rejectThreshold: '2.5',
+      maxIdleMachines: '4',
+      alarmEmail: 'knitprod-alerts@epyllion.com',
+      targets: {
+        'EKL': '7500',
+        'EFL': '15000',
+        'EFL-2': '15000',
+        'Auto Stripe': '12000',
+        'EFL-Extension': '15000',
+        'ESL-Extension': '10000',
+      },
+      machines: {
+        'EKL': '48',
+        'EFL': '40',
+        'EFL-2': '35',
+        'Auto Stripe': '20',
+        'EFL-Extension': '25',
+        'ESL-Extension': '16',
+      }
+    },
+    users: [],
+    ledger: [],
+    productionEntries: [],
+    activityLogs: []
+  };
+
+  if (fs.existsSync(DB_FILE)) {
+    try {
+      const fileData = fs.readFileSync(DB_FILE, 'utf-8');
+      const parsed = JSON.parse(fileData);
+      if (parsed) {
+        db = { ...db, ...parsed };
+      }
+    } catch (e) {
+      console.error('Error reading app_db.json:', e);
+    }
+  }
+  return db;
+}
+
+function saveDb(partial: any) {
+  const current = loadDb();
+  const updated = { ...current, ...partial };
+  try {
+    fs.writeFileSync(DB_FILE, JSON.stringify(updated, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('Error writing app_db.json:', e);
+  }
+  return updated;
+}
+
 // GET central database configuration
 app.get('/api/config', (req, res) => {
   const config = loadConfig();
@@ -64,6 +120,108 @@ app.post('/api/config', (req, res) => {
     databaseMode: (databaseMode === 'gas' || databaseMode === 'mock') ? databaseMode : undefined,
   });
   res.json({ success: true, config: updated });
+});
+
+// Central Database state endpoint (cross-device fallback store)
+app.get('/api/db', (req, res) => {
+  const db = loadDb();
+  res.json({ success: true, db });
+});
+
+app.post('/api/db', (req, res) => {
+  const updated = saveDb(req.body || {});
+  res.json({ success: true, db: updated });
+});
+
+// Proxy to Google Apps Script REST API to prevent CORS issues across all devices
+app.all('/api/gas-proxy', async (req, res) => {
+  const config = loadConfig();
+  
+  try {
+    let targetUrl = config.gasWebAppUrl;
+    
+    // Allow URL override from body or query if provided
+    if (req.method === 'GET' && req.query.url) {
+      targetUrl = String(req.query.url);
+    } else if (req.method === 'POST' && req.body && req.body.url) {
+      targetUrl = String(req.body.url);
+    }
+
+    if (!targetUrl || !targetUrl.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Google Apps Script Web App URL is not configured centrally on the server.'
+      });
+    }
+
+    const trimmedUrl = targetUrl.trim();
+
+    if (req.method === 'GET') {
+      const urlObj = new URL(trimmedUrl);
+      for (const [key, val] of Object.entries(req.query)) {
+        if (key !== 'url') {
+          urlObj.searchParams.append(key, String(val));
+        }
+      }
+
+      const response = await fetch(urlObj.toString(), {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        redirect: 'follow'
+      });
+
+      if (!response.ok) {
+        return res.status(response.status).json({
+          success: false,
+          message: `Google Apps Script returned HTTP status ${response.status}`
+        });
+      }
+
+      const text = await response.text();
+      try {
+        const json = JSON.parse(text);
+        return res.json(json);
+      } catch (e) {
+        return res.json({ success: false, message: 'Invalid JSON response from Apps Script', raw: text });
+      }
+    } else if (req.method === 'POST') {
+      // Forward POST payload to Google Apps Script
+      const postBody = { ...req.body };
+      delete postBody.url; // Remove internal url param if passed
+
+      const response = await fetch(trimmedUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8'
+        },
+        body: JSON.stringify(postBody),
+        redirect: 'follow'
+      });
+
+      if (!response.ok) {
+        return res.status(response.status).json({
+          success: false,
+          message: `Google Apps Script returned HTTP status ${response.status}`
+        });
+      }
+
+      const text = await response.text();
+      try {
+        const json = JSON.parse(text);
+        return res.json(json);
+      } catch (e) {
+        return res.json({ success: false, message: 'Invalid JSON response from Apps Script', raw: text });
+      }
+    } else {
+      return res.status(405).json({ success: false, message: 'Method not allowed' });
+    }
+  } catch (err: any) {
+    console.error('GAS Proxy Error:', err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Error communicating with Google Apps Script'
+    });
+  }
 });
 
 app.get('/api/health', (req, res) => {

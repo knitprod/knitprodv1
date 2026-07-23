@@ -61,12 +61,11 @@ export default function SettingsView() {
     setTestSuccess(null);
 
     try {
-      // Temporarily write to retrieve health check
+      // Route test through server proxy to bypass CORS restrictions on all devices
       const tempUrl = gasWebAppUrl.trim();
-      const separator = tempUrl.includes('?') ? '&' : '?';
-      const testUrl = `${tempUrl}${separator}action=health`;
+      const testUrl = `/api/gas-proxy?action=health&url=${encodeURIComponent(tempUrl)}`;
       
-      const res = await fetch(testUrl, { mode: 'cors' });
+      const res = await fetch(testUrl);
       if (!res.ok) {
         throw new Error(`HTTP status: ${res.status}`);
       }
@@ -82,7 +81,7 @@ export default function SettingsView() {
     } catch (err: any) {
       console.error("Connection test failed:", err);
       setTestSuccess(false);
-      setTestResult(`Connection Failed: ${err.message || 'Network Error'}. Ensure you've deployed the Apps Script as a Web App, configured access to "Anyone", and enabled CORS.`);
+      setTestResult(`Connection Failed: ${err.message || 'Network Error'}. Ensure you've deployed the Apps Script as a Web App and configured access to "Anyone".`);
     } finally {
       setIsTesting(false);
     }
@@ -115,6 +114,31 @@ export default function SettingsView() {
     localStorage.setItem('total_machines_Auto Stripe', machinesAutoStripe);
     localStorage.setItem('total_machines_EFL-Extension', machinesEFLExt);
     localStorage.setItem('total_machines_ESL-Extension', machinesESLExt);
+
+    // Persist centrally on server DB for all devices
+    await GasClient.saveServerDb({
+      settings: {
+        rejectThreshold,
+        maxIdleMachines,
+        alarmEmail,
+        targets: {
+          'EKL': targetEKL,
+          'EFL': targetEFL,
+          'EFL-2': targetEFL2,
+          'Auto Stripe': targetAutoStripe,
+          'EFL-Extension': targetEFLExt,
+          'ESL-Extension': targetESLExt,
+        },
+        machines: {
+          'EKL': machinesEKL,
+          'EFL': machinesEFL,
+          'EFL-2': machinesEFL2,
+          'Auto Stripe': machinesAutoStripe,
+          'EFL-Extension': machinesEFLExt,
+          'ESL-Extension': machinesESLExt,
+        }
+      }
+    });
 
     setIsSaved(true);
     setTimeout(() => {

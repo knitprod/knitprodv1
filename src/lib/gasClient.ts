@@ -93,67 +93,94 @@ export class GasClient {
   }
 
   /**
-   * Performs an API request to the Google Apps Script endpoint.
-   * Uses text/plain to avoid CORS preflight issues where applicable,
-   * which is a best-practice when sending JSON payloads to Apps Script.
+   * Fetches the central database store from the full-stack server
    */
-  private static async request<T>(action: string, method: 'GET' | 'POST', bodyData?: any): Promise<{ success: boolean; message?: string; data?: T }> {
-    const url = this.getWebAppUrl();
-    if (!url) {
-      throw new Error("Google Apps Script Web App URL is not configured. Please check your Settings.");
-    }
-
-    // Build fetch parameters
-    let fetchUrl = url;
-    const options: RequestInit = {
-      method: method,
-      mode: 'cors',
-      headers: {}
-    };
-
-    if (method === 'GET') {
-      const separator = url.includes('?') ? '&' : '?';
-      fetchUrl = `${url}${separator}action=${encodeURIComponent(action)}`;
-      // Append extra params if passed as bodyData
-      if (bodyData) {
-        const queryParams = new URLSearchParams(bodyData).toString();
-        if (queryParams) {
-          fetchUrl += `&${queryParams}`;
+  static async fetchServerDb(): Promise<any> {
+    try {
+      const res = await fetch('/api/db');
+      if (res.ok) {
+        const json = await res.json();
+        if (json && json.success && json.db) {
+          return json.db;
         }
       }
-    } else {
-      // POST requests route action in the payload
-      // Google Apps Script doPost receives the action inside the body JSON
-      const currentUserStr = localStorage.getItem('active_knitting_user');
-      let uid = 'ANONYMOUS';
-      let token = '';
-      if (currentUserStr) {
-        try {
-          const parsed = JSON.parse(currentUserStr);
-          uid = parsed.uid || 'ANONYMOUS';
-          token = parsed.token || '';
-        } catch(e) {}
+    } catch (err) {
+      console.warn("Could not fetch server DB:", err);
+    }
+    return null;
+  }
+
+  /**
+   * Updates the central database store on the full-stack server
+   */
+  static async saveServerDb(partial: any): Promise<void> {
+    try {
+      await fetch('/api/db', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(partial)
+      });
+    } catch (err) {
+      console.error("Could not save server DB:", err);
+    }
+  }
+
+  /**
+   * Performs an API request to the Google Apps Script endpoint via the server proxy.
+   * Eliminates cross-origin CORS limitations across all user devices.
+   */
+  private static async request<T>(action: string, method: 'GET' | 'POST', bodyData?: any): Promise<{ success: boolean; message?: string; data?: T }> {
+    const webAppUrl = this.getWebAppUrl();
+    const currentUserStr = typeof window !== 'undefined' ? localStorage.getItem('active_knitting_user') : null;
+    let uid = 'ANONYMOUS';
+    let token = '';
+    if (currentUserStr) {
+      try {
+        const parsed = JSON.parse(currentUserStr);
+        uid = parsed.uid || 'ANONYMOUS';
+        token = parsed.token || '';
+      } catch(e) {}
+    }
+
+    if (method === 'GET') {
+      const queryParams = new URLSearchParams();
+      queryParams.append('action', action);
+      if (webAppUrl) {
+        queryParams.append('url', webAppUrl);
+      }
+      if (bodyData) {
+        Object.entries(bodyData).forEach(([k, v]) => {
+          if (v !== undefined && v !== null) {
+            queryParams.append(k, String(v));
+          }
+        });
       }
 
-      options.body = JSON.stringify({
-        action: action,
-        uid: uid,
-        token: token,
-        data: bodyData
+      const response = await fetch(`/api/gas-proxy?${queryParams.toString()}`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      return await response.json();
+    } else {
+      const response = await fetch('/api/gas-proxy', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          action: action,
+          uid: uid,
+          token: token,
+          data: bodyData,
+          url: webAppUrl || undefined
+        })
       });
-      // Content-type text/plain is optimal for Google Apps Script to eliminate CORS preflight checks
-      options.headers = {
-        'Content-Type': 'text/plain;charset=utf-8'
-      };
-    }
 
-    const response = await fetch(fetchUrl, options);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      return await response.json();
     }
-
-    const json = await response.json();
-    return json;
   }
 
   // ==========================================================

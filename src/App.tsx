@@ -288,11 +288,30 @@ export default function App() {
     }
   };
 
-  // Synchronize with Google Sheets whenever user navigates or refreshes
+  // Synchronize with Google Sheets & Server DB whenever user navigates or refreshes
   useEffect(() => {
     const initAndLoad = async () => {
-      await GasClient.fetchServerConfig();
-      if (GasClient.getDatabaseMode() === 'gas' && GasClient.getWebAppUrl()) {
+      const config = await GasClient.fetchServerConfig();
+      const serverDb = await GasClient.fetchServerDb();
+
+      if (serverDb && serverDb.settings) {
+        const { targets, machines } = serverDb.settings;
+        if (targets) {
+          Object.entries(targets).forEach(([k, v]) => {
+            if (v) localStorage.setItem(`target_capacity_${k}`, String(v));
+          });
+        }
+        if (machines) {
+          Object.entries(machines).forEach(([k, v]) => {
+            if (v) localStorage.setItem(`total_machines_${k}`, String(v));
+          });
+        }
+      }
+
+      const activeMode = config.databaseMode || GasClient.getDatabaseMode();
+      const activeUrl = config.gasWebAppUrl || GasClient.getWebAppUrl();
+
+      if (activeMode === 'gas' && activeUrl) {
         loadLiveGasData();
       }
     };

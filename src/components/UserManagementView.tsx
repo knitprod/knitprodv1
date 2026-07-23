@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { GasClient } from '../lib/gasClient';
 import { 
   Users, 
   UserPlus, 
@@ -195,10 +196,22 @@ export default function UserManagementView() {
     return INITIAL_USERS;
   });
 
-  // Save to LocalStorage whenever users state changes
+  // Load users from central server DB on mount
+  useEffect(() => {
+    const syncUsersWithServer = async () => {
+      const db = await GasClient.fetchServerDb();
+      if (db && Array.isArray(db.users) && db.users.length > 0) {
+        setUsers(db.users);
+      }
+    };
+    syncUsersWithServer();
+  }, []);
+
+  // Save to LocalStorage and Central Server DB whenever users state changes
   useEffect(() => {
     if (typeof window !== 'undefined') {
       localStorage.setItem('knitting_system_users_ledger', JSON.stringify(users));
+      GasClient.saveServerDb({ users });
     }
   }, [users]);
 

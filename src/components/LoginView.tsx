@@ -86,21 +86,30 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
   const [userRoster, setUserRoster] = useState<UserRecord[]>(DEFAULT_USERS);
   const [activeTab, setActiveTab] = useState<'form' | 'demo'>('form');
 
-  // Load user ledger from localStorage to allow logging in with newly created users
+  // Load user ledger from server DB & localStorage to allow logging in with newly created users on any device
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('knitting_system_users_ledger');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved) as UserRecord[];
-          if (parsed && parsed.length > 0) {
-            setUserRoster(parsed);
+    const loadUsers = async () => {
+      const db = await GasClient.fetchServerDb();
+      if (db && Array.isArray(db.users) && db.users.length > 0) {
+        setUserRoster(db.users);
+        return;
+      }
+
+      if (typeof window !== 'undefined') {
+        const saved = localStorage.getItem('knitting_system_users_ledger');
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved) as UserRecord[];
+            if (parsed && parsed.length > 0) {
+              setUserRoster(parsed);
+            }
+          } catch (e) {
+            console.error("Error reading users ledger on login init:", e);
           }
-        } catch (e) {
-          console.error("Error reading users ledger on login init:", e);
         }
       }
-    }
+    };
+    loadUsers();
   }, []);
 
   const handleLoginSubmit = async (e: React.FormEvent) => {

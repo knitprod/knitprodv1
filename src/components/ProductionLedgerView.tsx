@@ -250,11 +250,19 @@ export default function ProductionLedgerView() {
 
   React.useEffect(() => {
     const initAndLoad = async () => {
-      await GasClient.fetchServerConfig();
-      const mode = GasClient.getDatabaseMode();
-      if (mode === 'gas' && GasClient.getWebAppUrl()) {
+      const config = await GasClient.fetchServerConfig();
+      const activeMode = config.databaseMode || GasClient.getDatabaseMode();
+      const activeUrl = config.gasWebAppUrl || GasClient.getWebAppUrl();
+
+      if (activeMode === 'gas' && activeUrl) {
         setIsGasMode(true);
         loadGasLedger();
+      } else {
+        // Fallback: sync with central server DB
+        const db = await GasClient.fetchServerDb();
+        if (db && Array.isArray(db.ledger) && db.ledger.length > 0) {
+          setLedger(db.ledger);
+        }
       }
     };
     initAndLoad();
@@ -263,6 +271,7 @@ export default function ProductionLedgerView() {
   React.useEffect(() => {
     if (typeof window !== 'undefined') {
       localStorage.setItem('knitting_production_ledger', JSON.stringify(ledger));
+      GasClient.saveServerDb({ ledger: ledger });
     }
   }, [ledger]);
 
